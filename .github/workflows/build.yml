@@ -33,7 +33,7 @@ jobs:
           echo "⚙️ Tweaking specific package configuration parameter block for Unbound 1.26.1..."
           sed -i 's|PKG_VERSION:=.*|PKG_VERSION:=1.26.1|g' "$MAKEFILE_PATH"
           
-          # Corrected hash verification map matching the genuine 1.26.1 source tarball
+          # Corrected hash verification map targeting the authentic 1.26.1 source tarball
           sed -i 's|PKG_HASH:=.*|PKG_HASH:=35a6dc0e425a9282c3426d9a3043144011bf0534aed4b73ab62c52aee0af1503|g' "$MAKEFILE_PATH"
           
           sed -i 's|--enable-tfo-server|--enable-tfo-server \\\n\t--with-cflags="-O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53" \\\n\t--enable-cachedb \\\n\t--with-libhiredis=$(STAGING_DIR)/usr|g' "$MAKEFILE_PATH"
