@@ -33,7 +33,7 @@ jobs:
           echo "⚙️ Tweaking specific package configuration parameter block for Unbound 1.26.1..."
           sed -i 's|PKG_VERSION:=.*|PKG_VERSION:=1.26.1|g' "$MAKEFILE_PATH"
           
-          # Corrected hash verification map targeting the authentic 1.26.1 source tarball
+          # Corrected hash verification map matching the genuine 1.26.1 source tarball
           sed -i 's|PKG_HASH:=.*|PKG_HASH:=35a6dc0e425a9282c3426d9a3043144011bf0534aed4b73ab62c52aee0af1503|g' "$MAKEFILE_PATH"
           
           sed -i 's|--enable-tfo-server|--enable-tfo-server \\\n\t--with-cflags="-O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53" \\\n\t--enable-cachedb \\\n\t--with-libhiredis=$(STAGING_DIR)/usr|g' "$MAKEFILE_PATH"
@@ -55,14 +55,20 @@ jobs:
       run: |
         cd openwrt
         
+        # Completely clear old seeds to prevent default target values from leaking
+        rm -f .config
+        
         # -----------------------------------------------------------------
-        # EXPLICIT JIO JIDU 6J01 BUILD PROFILE DEFINTION
+        # EXPLICIT JIO JIDU 6J01 BUILD PROFILE DEFINITION
         # -----------------------------------------------------------------
-        echo "CONFIG_TARGET_mediatek=y" > .config
+        echo "CONFIG_TARGET_mediatek=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jio_jidu6j01=y" >> .config
         
-        # Enforce initial verification map selection rules
+        # Forcefully unsetting the reference target blocks compilation fallbacks
+        echo "# CONFIG_TARGET_mediatek_filogic_DEVICE_openwrt_one is not set" >> .config
+        
+        # Structural layout variables matching the device target environment map
         echo "CONFIG_HAS_SUBTARGETS=y" >> .config
         echo "CONFIG_TARGET_BOARD=\"mediatek\"" >> .config
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
@@ -124,8 +130,9 @@ jobs:
         # Hard-set compilation optimizations across the global tree matrix
         echo "CONFIG_TARGET_OPTIONS=y" >> .config
         echo "CONFIG_TARGET_OPTIMIZATION=\"-O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53\"" >> .config
+        echo "CONFIG_EXTRA_OPTIMIZATION=\"\"" >> .config
         
-        # Expands dependency profile trees and locks layout targeting onto JIDU6J01
+        # Expands configuration trees and explicitly prevents falling back to alternative models
         make defconfig
 
     - name: Compile Toolchain and Custom Firmware
