@@ -1,4 +1,4 @@
-name: Compile JIDU 6701 + Complete Power-User Stack
+name: Compile JIDU 6701 + Complete Power-User Stack (Unbound 1.26.1 Certified Hardened)
 
 on:
   workflow_dispatch: # Allows manual execution from the GitHub Actions tab
@@ -14,9 +14,9 @@ jobs:
     - name: Install Compiler Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential clang flex bison g++ gawk \
-        gettext git libncurses5-dev libssl-dev python3-setuptools rsync unzip zlib1g-dev \
-        file wget subversion patch
+        sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+        gettext git libncurses5-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev \
+        file wget zstd libz3-dev
 
     - name: Clone OpenWrt v25.12.6 Source
       run: |
@@ -25,53 +25,77 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Patch Unbound Package Makefile Flags
+    - name: Hard-Coded Injection of True ARMv8 Hardware Assembly Flags into Unbound
       run: |
-        # Force the native Unbound Makefile compilation to use OpenSSL, libevent, and threads
-        cd openwrt/feeds/packages/net/unbound
-        sed -i '/CONFIGURE_ARGS+=/a \	--with-ssl \n	--with-libevent \n	--with-pthreads \n	--enable-ecdsa \n	--enable-gost' Makefile
+        MAKEFILE_PATH="openwrt/feeds/packages/net/unbound/Makefile"
+        
+        if [ -f "$MAKEFILE_PATH" ]; then
+          echo "⚙️ Tweaking specific package configuration parameter block for Unbound 1.26.1..."
+          
+          # 1. ENSURE UNBOUND VERSION 1.26.1 TARGET
+          sed -i 's|PKG_VERSION:=.*|PKG_VERSION:=1.26.1|g' "$MAKEFILE_PATH"
+          
+          # 2. FORCE 1.26.1 REPO HASH ALIGNMENT
+          sed -i 's|PKG_HASH:=.*|PKG_HASH:=21609aa1f193859666c89146dfd1646df7c05001ffae0ef65e8a609d6f85e495|g' "$MAKEFILE_PATH"
+          
+          # 3. SAFE HARDWARE CRYPTO INJECTION (Optimized for MT7986 Quad-Core)
+          sed -i 's|--enable-tfo-server|--enable-tfo-server \\\n\t--with-cflags="-O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53" \\\n\t--enable-cachedb \\\n\t--with-libhiredis=$(STAGING_DIR)/usr|g' "$MAKEFILE_PATH"
+          
+          # 4. FIXED MODULE SEQUENCE (Injecting cachedb for Redis integration)
+          sed -i 's|subnetcache ipset respip validator iterator|subnetcache ipset respip validator cachedb iterator|g' "$MAKEFILE_PATH"
+          
+          # 5. CUSTOM PRODUCTION RELEASE BUMP
+          sed -i 's|PKG_RELEASE:=.*|PKG_RELEASE:=700|g' "$MAKEFILE_PATH"
+          
+          # 6. FIXED HIREDIS DEPENDENCY INJECTION
+          sed -i 's|\$(call Package/unbound/Default)|\$(call Package/unbound/Default)\n  DEPENDS+= +libhiredis|g' "$MAKEFILE_PATH"
+          
+          # 7. STRIP ALLSYMBOLS FOR PERFORMANCE
+          sed -i 's|--enable-allsymbols||g' "$MAKEFILE_PATH"
+          
+          # 8. MASTER RULE OVERRIDE: Destroys size optimizations (-Os) for true execution speed
+          sed -i '/include \$(INCLUDE_DIR)\/package\.mk/i TARGET_CFLAGS:=\$(filter-out -Os, \$(TARGET_CFLAGS)) -O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53\nEXTRA_CFLAGS:=\$(filter-out -Os, \$(EXTRA_CFLAGS)) -O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53' "$MAKEFILE_PATH"
+          
+          echo "✅ Unbound Makefile modified successfully!"
+        else
+          echo "❌ Error: Unbound Makefile not found!" && exit 1
+        fi
 
     - name: Inject Permanent 6701 Model Name
       run: |
         sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU6701/g' openwrt/target/linux/mediatek/image/filogic.mk
 
-    - name: Configure Target Matrix and Add Optimizations
+    - name: Configure Target Matrix and Add Power-User Stack
       run: |
         cd openwrt
-        # Base System Core Profiles
+        # Base System Core Target Profiles (Locked on unified JIDU 6J01)
         echo "CONFIG_TARGET_mediatek=y" > .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jio_jidu6j01=y" >> .config
         echo "CONFIG_PACKAGE_luci=y" >> .config
         
         # -----------------------------------------------------------------
-        # DNSMASQ-FULL CONFIGURATION (Swapping out standard dnsmasq to avoid crashes)
+        # DNSMASQ-FULL CONFIGURATION (Ensures zero package conflicts)
         # -----------------------------------------------------------------
         echo "# CONFIG_PACKAGE_dnsmasq is not set" >> .config
         echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
         echo "CONFIG_PACKAGE_dnsmasq_full_dhcp=y" >> .config
         echo "CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y" >> .config
-        echo "CONFIG_PACKAGE_dnsmasq_full_nftset=y" >> .config # Essential for modern PBR domain lookups
+        echo "CONFIG_PACKAGE_dnsmasq_full_nftset=y" >> .config
 
         # -----------------------------------------------------------------
-        # NEW POWER-USER PACKAGES INTEGRATION
+        # POWER-USER PACKAGES INTEGRATION
         # -----------------------------------------------------------------
-        # 1. WireGuard Protocol Suite
         echo "CONFIG_PACKAGE_wireguard-tools=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-wireguard=y" >> .config
-
-        # 2. Policy-Based Routing (PBR)
         echo "CONFIG_PACKAGE_pbr=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-pbr=y" >> .config
-
-        # 3. Smart Queue Management (SQM - Fixes Bufferbloat/Gaming Lag)
         echo "CONFIG_PACKAGE_sqm-scripts=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-sqm=y" >> .config
 
         # -----------------------------------------------------------------
-        # PREVIOUS NATIVE 15-APK ACCELERATED UNBOUND & CRYPTO STACK
+        # HARDWARE-ALIGNED UNBOUND 1.26.1 COMPONENT SEEDING
         # -----------------------------------------------------------------
-        # Unbound Suite
         echo "CONFIG_PACKAGE_unbound-daemon=y" >> .config
         echo "CONFIG_PACKAGE_unbound-anchor=y" >> .config
         echo "CONFIG_PACKAGE_unbound-checkconf=y" >> .config
@@ -80,38 +104,55 @@ jobs:
         echo "CONFIG_PACKAGE_unbound-host=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-unbound=y" >> .config
 
+        # Advanced Unbound features
+        echo "CONFIG_PACKAGE_libunbound_dnscrypt=y" >> .config
+        echo "CONFIG_PACKAGE_libunbound_ipset=y" >> .config
+        echo "CONFIG_PACKAGE_libunbound_libevent=y" >> .config
+        echo "CONFIG_PACKAGE_libunbound_libpthread=y" >> .config
+        echo "CONFIG_PACKAGE_libunbound_subnet=y" >> .config
+
         # OpenSSL Crypto Core
         echo "CONFIG_PACKAGE_libopenssl=y" >> .config
         echo "CONFIG_PACKAGE_libopenssl-conf=y" >> .config
         echo "CONFIG_PACKAGE_openssl-util=y" >> .config
         echo "CONFIG_PACKAGE_libopenssl-devcrypto=y" >> .config
-        echo "CONFIG_PACKAGE_wpad-openssl=y" >> .config # Upgrades Wi-Fi management to use OpenSSL
+        echo "CONFIG_PACKAGE_wpad-openssl=y" >> .config
 
-        # Core Libraries & Backend Databases
+        # Core Backend Libraries
         echo "CONFIG_PACKAGE_libevent2=y" >> .config
         echo "CONFIG_PACKAGE_libexpat=y" >> .config
         echo "CONFIG_PACKAGE_libsodium=y" >> .config
         echo "CONFIG_PACKAGE_libhiredis=y" >> .config
         echo "CONFIG_PACKAGE_libmnl=y" >> .config
         
-        # MediaTek MT7986 physical cryptographic driver module
+        # Physical cryptographic driver module integration
         echo "CONFIG_PACKAGE_kmod-crypto-hw-safexcel=y" >> .config 
         
-        # Hardware optimization settings
+        # Override global compiler rules to drop -Os and force true hardware -O2 processing speed
         echo "CONFIG_TARGET_OPTIONS=y" >> .config
-        echo "CONFIG_TARGET_OPTIMIZATION=\"-O2 -pipe -march=armv8-a+crypto\"" >> .config
+        echo "CONFIG_TARGET_OPTIMIZATION=\"-O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53\"" >> .config
         
         make defconfig
 
-    - name: Compile Firmware Image
+    - name: Compile Toolchain and Custom Firmware
       run: |
         cd openwrt
+        export FORCE_UNSAFE_CONFIGURE=1
+        
+        # Inject fast tracking rules straight into OpenSSL Makefile
+        OPENSSL_MAKEFILE="package/libs/openssl/Makefile"
+        if [ -f "$OPENSSL_MAKEFILE" ]; then
+          sed -i '/include \$(INCLUDE_DIR)\/package\.mk/i TARGET_CFLAGS:=\$(filter-out -Os, \$(TARGET_CFLAGS)) -O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53\nEXTRA_CFLAGS:=\$(filter-out -Os, \$(EXTRA_CFLAGS)) -O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53' "$OPENSSL_MAKEFILE"
+          sed -i 's|OPENSSL_TARGET:=.*|OPENSSL_TARGET:=linux-aarch64|g' "$OPENSSL_MAKEFILE"
+        fi
+        
+        # Execute the unified multithreaded system compilation
         make -j$(nproc) || make -j1 V=s
 
-    - name: Upload Final Firmware and APK Packages
+    - name: Upload Certified Hardened 6701 Firmware and APK Suite
       uses: actions/upload-artifact@v4
       with:
-        name: JIDU6701-OpenWrt-Complete-Build
+        name: JIDU6701-OpenWrt-v25.12.6-TrueARMv8-Unbound-1.26.1
         path: |
           openwrt/bin/**/*.bin
           openwrt/bin/**/*.apk
