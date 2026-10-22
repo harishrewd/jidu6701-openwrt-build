@@ -32,7 +32,10 @@ jobs:
         if [ -f "$MAKEFILE_PATH" ]; then
           echo "⚙️ Tweaking specific package configuration parameter block for Unbound 1.26.1..."
           sed -i 's|PKG_VERSION:=.*|PKG_VERSION:=1.26.1|g' "$MAKEFILE_PATH"
-          sed -i 's|PKG_HASH:=.*|PKG_HASH:=21609aa1f193859666c89146dfd1646df7c05001ffae0ef65e8a609d6f85e495|g' "$MAKEFILE_PATH"
+          
+          # Corrected hash verification map matching the genuine 1.26.1 source tarball
+          sed -i 's|PKG_HASH:=.*|PKG_HASH:=35a6dc0e425a9282c3426d9a3043144011bf0534aed4b73ab62c52aee0af1503|g' "$MAKEFILE_PATH"
+          
           sed -i 's|--enable-tfo-server|--enable-tfo-server \\\n\t--with-cflags="-O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53" \\\n\t--enable-cachedb \\\n\t--with-libhiredis=$(STAGING_DIR)/usr|g' "$MAKEFILE_PATH"
           sed -i 's|subnetcache ipset respip validator iterator|subnetcache ipset respip validator cachedb iterator|g' "$MAKEFILE_PATH"
           sed -i 's|PKG_RELEASE:=.*|PKG_RELEASE:=700|g' "$MAKEFILE_PATH"
@@ -76,7 +79,7 @@ jobs:
         echo "CONFIG_PACKAGE_dnsmasq_full_dhcp=y" >> .config
         echo "CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y" >> .config
         echo "CONFIG_PACKAGE_dnsmasq_full_nftset=y" >> .config
-
+        
         # -----------------------------------------------------------------
         # POWER-USER INTERFACE APPLICATIONS
         # -----------------------------------------------------------------
@@ -86,7 +89,7 @@ jobs:
         echo "CONFIG_PACKAGE_luci-app-pbr=y" >> .config
         echo "CONFIG_PACKAGE_sqm-scripts=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-sqm=y" >> .config
-
+        
         # -----------------------------------------------------------------
         # 15-APK ACCELERATED UNBOUND 1.26.1 & CRYPTO SCHEME
         # -----------------------------------------------------------------
@@ -97,20 +100,19 @@ jobs:
         echo "CONFIG_PACKAGE_unbound-control-setup=y" >> .config
         echo "CONFIG_PACKAGE_unbound-host=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-unbound=y" >> .config
-
         echo "CONFIG_PACKAGE_libunbound_dnscrypt=y" >> .config
         echo "CONFIG_PACKAGE_libunbound_ipset=y" >> .config
         echo "CONFIG_PACKAGE_libunbound_libevent=y" >> .config
         echo "CONFIG_PACKAGE_libunbound_libpthread=y" >> .config
         echo "CONFIG_PACKAGE_libunbound_subnet=y" >> .config
-
+        
         # Cryptographic dependencies linked to safexcel offloader
         echo "CONFIG_PACKAGE_libopenssl=y" >> .config
         echo "CONFIG_PACKAGE_libopenssl-conf=y" >> .config
         echo "CONFIG_PACKAGE_openssl-util=y" >> .config
         echo "CONFIG_PACKAGE_libopenssl-devcrypto=y" >> .config
         echo "CONFIG_PACKAGE_wpad-openssl=y" >> .config
-
+        
         # Essential platform database modules
         echo "CONFIG_PACKAGE_libevent2=y" >> .config
         echo "CONFIG_PACKAGE_libexpat=y" >> .config
