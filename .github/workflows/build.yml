@@ -1,0 +1,117 @@
+name: Compile JIDU 6701 + Complete Power-User Stack
+
+on:
+  workflow_dispatch: # Allows manual execution from the GitHub Actions tab
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Install Compiler Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential clang flex bison g++ gawk \
+        gettext git libncurses5-dev libssl-dev python3-setuptools rsync unzip zlib1g-dev \
+        file wget subversion patch
+
+    - name: Clone OpenWrt v25.12.6 Source
+      run: |
+        git clone -b v25.12.6 https://github.com/openwrt/openwrt.git
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Patch Unbound Package Makefile Flags
+      run: |
+        # Force the native Unbound Makefile compilation to use OpenSSL, libevent, and threads
+        cd openwrt/feeds/packages/net/unbound
+        sed -i '/CONFIGURE_ARGS+=/a \	--with-ssl \n	--with-libevent \n	--with-pthreads \n	--enable-ecdsa \n	--enable-gost' Makefile
+
+    - name: Inject Permanent 6701 Model Name
+      run: |
+        sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU6701/g' openwrt/target/linux/mediatek/image/filogic.mk
+
+    - name: Configure Target Matrix and Add Optimizations
+      run: |
+        cd openwrt
+        # Base System Core Profiles
+        echo "CONFIG_TARGET_mediatek=y" > .config
+        echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+        echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jio_jidu6j01=y" >> .config
+        echo "CONFIG_PACKAGE_luci=y" >> .config
+        
+        # -----------------------------------------------------------------
+        # DNSMASQ-FULL CONFIGURATION (Swapping out standard dnsmasq to avoid crashes)
+        # -----------------------------------------------------------------
+        echo "# CONFIG_PACKAGE_dnsmasq is not set" >> .config
+        echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
+        echo "CONFIG_PACKAGE_dnsmasq_full_dhcp=y" >> .config
+        echo "CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y" >> .config
+        echo "CONFIG_PACKAGE_dnsmasq_full_nftset=y" >> .config # Essential for modern PBR domain lookups
+
+        # -----------------------------------------------------------------
+        # NEW POWER-USER PACKAGES INTEGRATION
+        # -----------------------------------------------------------------
+        # 1. WireGuard Protocol Suite
+        echo "CONFIG_PACKAGE_wireguard-tools=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-wireguard=y" >> .config
+
+        # 2. Policy-Based Routing (PBR)
+        echo "CONFIG_PACKAGE_pbr=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-pbr=y" >> .config
+
+        # 3. Smart Queue Management (SQM - Fixes Bufferbloat/Gaming Lag)
+        echo "CONFIG_PACKAGE_sqm-scripts=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-sqm=y" >> .config
+
+        # -----------------------------------------------------------------
+        # PREVIOUS NATIVE 15-APK ACCELERATED UNBOUND & CRYPTO STACK
+        # -----------------------------------------------------------------
+        # Unbound Suite
+        echo "CONFIG_PACKAGE_unbound-daemon=y" >> .config
+        echo "CONFIG_PACKAGE_unbound-anchor=y" >> .config
+        echo "CONFIG_PACKAGE_unbound-checkconf=y" >> .config
+        echo "CONFIG_PACKAGE_unbound-control=y" >> .config
+        echo "CONFIG_PACKAGE_unbound-control-setup=y" >> .config
+        echo "CONFIG_PACKAGE_unbound-host=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-unbound=y" >> .config
+
+        # OpenSSL Crypto Core
+        echo "CONFIG_PACKAGE_libopenssl=y" >> .config
+        echo "CONFIG_PACKAGE_libopenssl-conf=y" >> .config
+        echo "CONFIG_PACKAGE_openssl-util=y" >> .config
+        echo "CONFIG_PACKAGE_libopenssl-devcrypto=y" >> .config
+        echo "CONFIG_PACKAGE_wpad-openssl=y" >> .config # Upgrades Wi-Fi management to use OpenSSL
+
+        # Core Libraries & Backend Databases
+        echo "CONFIG_PACKAGE_libevent2=y" >> .config
+        echo "CONFIG_PACKAGE_libexpat=y" >> .config
+        echo "CONFIG_PACKAGE_libsodium=y" >> .config
+        echo "CONFIG_PACKAGE_libhiredis=y" >> .config
+        echo "CONFIG_PACKAGE_libmnl=y" >> .config
+        
+        # MediaTek MT7986 physical cryptographic driver module
+        echo "CONFIG_PACKAGE_kmod-crypto-hw-safexcel=y" >> .config 
+        
+        # Hardware optimization settings
+        echo "CONFIG_TARGET_OPTIONS=y" >> .config
+        echo "CONFIG_TARGET_OPTIMIZATION=\"-O2 -pipe -march=armv8-a+crypto\"" >> .config
+        
+        make defconfig
+
+    - name: Compile Firmware Image
+      run: |
+        cd openwrt
+        make -j$(nproc) || make -j1 V=s
+
+    - name: Upload Final Firmware and APK Packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: JIDU6701-OpenWrt-Complete-Build
+        path: |
+          openwrt/bin/**/*.bin
+          openwrt/bin/**/*.apk
