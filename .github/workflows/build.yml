@@ -49,21 +49,22 @@ jobs:
 
     - name: Inject Permanent 6701 Model Name
       run: |
+        # Replaces the unified umbrella name block to brand your images explicitly for the 6701 hardware variation
         sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU6701/g' openwrt/target/linux/mediatek/image/filogic.mk
 
     - name: Configure Target Matrix and Add Power-User Stack
       run: |
         cd openwrt
         
-        # Completely clear old seeds to prevent default target values from leaking
+        # Completely clear old configurations to prevent default target values from leaking
         rm -f .config
         
         # -----------------------------------------------------------------
-        # EXPLICIT JIO JIDU 6J01 BUILD PROFILE DEFINITION
+        # TRUE CORNERSTONE JIO JIDU BUILD PROFILE DEFINITIONS (FIXED IDENTIFIER)
         # -----------------------------------------------------------------
         echo "CONFIG_TARGET_mediatek=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-        echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jio_jidu6j01=y" >> .config
+        echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jiorouter_ax6000-jidu6j01=y" >> .config
         
         # Forcefully unsetting the reference target blocks compilation fallbacks
         echo "# CONFIG_TARGET_mediatek_filogic_DEVICE_openwrt_one is not set" >> .config
@@ -72,7 +73,7 @@ jobs:
         echo "CONFIG_HAS_SUBTARGETS=y" >> .config
         echo "CONFIG_TARGET_BOARD=\"mediatek\"" >> .config
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
-        echo "CONFIG_TARGET_PROFILE=\"DEVICE_jio_jidu6j01\"" >> .config
+        echo "CONFIG_TARGET_PROFILE=\"DEVICE_jiorouter_ax6000-jidu6j01\"" >> .config
         
         # Embed core graphical system tools
         echo "CONFIG_PACKAGE_luci=y" >> .config
@@ -154,4 +155,3 @@ jobs:
         name: JIDU6701-OpenWrt-v25.12.6-TrueARMv8-Unbound-1.26.1
         path: |
           openwrt/bin/**/*.bin
-          openwrt/bin/**/*.apk
