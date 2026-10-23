@@ -49,7 +49,7 @@ jobs:
 
     - name: Inject Permanent 6701 Model Name
       run: |
-        # Replaces the unified umbrella name block to brand your images explicitly for the 6701 hardware variation
+        # Replaces the default umbrella name block to brand your images explicitly for the 6701 hardware variation
         sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU6701/g' openwrt/target/linux/mediatek/image/filogic.mk
 
     - name: Configure Target Matrix and Add Power-User Stack
