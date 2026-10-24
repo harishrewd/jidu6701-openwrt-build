@@ -27,7 +27,7 @@ jobs:
     - name: Clone Source Code (Exact Tag)
       run: |
         # Clone the repository and fetch the specific release tag precisely
-        git clone --depth 1 --branch $REPO_TAG $REPO_URL openwrt
+        git clone --depth 1 --branch ${{ env.REPO_TAG }} ${{ env.REPO_URL }} openwrt
 
     - name: Update & Install Feeds
       run: |
