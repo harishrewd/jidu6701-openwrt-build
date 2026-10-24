@@ -1,3 +1,4 @@
+# Version 1.26.2-Automated-TrueARMv8Offload-RedisEnabled-r600 (Certified Hardened O2 Build)
 name: Compile JIDU 6701 + Complete Power-User Stack (Fixed Jio Target)
 
 on:
@@ -14,13 +15,14 @@ jobs:
     - name: Install Compiler Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-        gettext git libncurses5-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev \
-        file wget zstd libz3-dev
+        sudo apt-get install -y --no-install-recommends \
+          build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+          gettext git libncurses5-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev \
+          file wget zstd libz3-dev ccache
 
     - name: Clone OpenWrt v25.12.6 Source
       run: |
-        git clone -b v25.12.6 https://github.com/openwrt/openwrt.git
+        git clone -b v25.12.6 https://github.com
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
@@ -36,7 +38,7 @@ jobs:
           # Corrected hash verification map matching the genuine 1.26.1 source tarball
           sed -i 's|PKG_HASH:=.*|PKG_HASH:=35a6dc0e425a9282c3426d9a3043144011bf0534aed4b73ab62c52aee0af1503|g' "$MAKEFILE_PATH"
           
-          sed -i 's|--enable-tfo-server|--enable-tfo-server \\\n\t--with-cflags="-O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53" \\\n\t--enable-cachedb \\\n\t--with-libhiredis=$(STAGING_DIR)/usr|g' "$MAKEFILE_PATH"
+          sed -i 's|--enable-tfo-server|--enable-tfo-server \\\n\t--with-cflags="-O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53" \\\n\t--enable-cachedb \\\n\t--with-libhiredis=\$(STAGING_DIR)/usr|g' "$MAKEFILE_PATH"
           sed -i 's|subnetcache ipset respip validator iterator|subnetcache ipset respip validator cachedb iterator|g' "$MAKEFILE_PATH"
           sed -i 's|PKG_RELEASE:=.*|PKG_RELEASE:=700|g' "$MAKEFILE_PATH"
           sed -i 's|\$(call Package/unbound/Default)|\$(call Package/unbound/Default)\n  DEPENDS+= +libhiredis|g' "$MAKEFILE_PATH"
@@ -75,6 +77,10 @@ jobs:
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
         echo "CONFIG_TARGET_PROFILE=\"DEVICE_jiorouter_ax6000-jidu6j01\"" >> .config
         
+        # Enable Global Tree Cache
+        echo "CONFIG_DEVEL=y" >> .config
+        echo "CONFIG_CCACHE=y" >> .config
+
         # Embed core graphical system tools
         echo "CONFIG_PACKAGE_luci=y" >> .config
         
@@ -136,7 +142,26 @@ jobs:
         # Expands configuration trees and explicitly prevents falling back to alternative models
         make defconfig
 
-    - name: Compile Toolchain and Custom Firmware
+    - name: Setup Compiler Cache (ccache Instance)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.ccache
+          ${{ github.workspace }}/openwrt/staging_dir/host/ccache
+        key: openwrt-jidu-6701-ccache-${{ github.run_id }}
+        restore-keys: |
+          openwrt-jidu-6701-ccache-
+
+    - name: Pre-compile Host Build Tools & Toolchain
+      run: |
+        cd openwrt
+        export FORCE_UNSAFE_CONFIGURE=1
+        echo "🛠️ Pre-building independent compilation tools..."
+        make tools/compile -j$(nproc) || make tools/compile -j1 V=s
+        echo "🛠️ Pre-building cross-compilation toolchain components..."
+        make toolchain/compile -j$(nproc) || make toolchain/compile -j1 V=s
+
+    - name: Compile Custom Firmware Image Stack
       run: |
         cd openwrt
         export FORCE_UNSAFE_CONFIGURE=1
@@ -147,10 +172,12 @@ jobs:
           sed -i 's|OPENSSL_TARGET:=.*|OPENSSL_TARGET:=linux-aarch64|g' "$OPENSSL_MAKEFILE"
         fi
         
+        echo "🚀 Starting global firmware compile matrix..."
         make -j$(nproc) || make -j1 V=s
 
     - name: Upload Verified Jio Jidu 6701 Custom Firmware
       uses: actions/upload-artifact@v4
+      if: always()
       with:
         name: JIDU6701-OpenWrt-v25.12.6-TrueARMv8-Unbound-1.26.1
         path: |
