@@ -1,11 +1,11 @@
 name: Build OpenWrt for JioRouter JIDU6701 (25.12.6+)
 
 on:
-  workflow_dispatch: # Allows you to trigger the build manually from the Actions tab
+  workflow_dispatch:
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt
-  REPO_BRANCH: main # Pulls the active branch containing the 25.12 code merges
+  REPO_BRANCH: main
 
 jobs:
   build:
@@ -34,50 +34,51 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Patch Model Target (Force JIDU6701 as Primary Name)
+    - name: Inject Runtime Model Detection Override (Force JIDU6701)
       run: |
         cd openwrt
-        TARGET_FILE="target/linux/mediatek/image/filogic.mk"
+        # Create a custom directory structure to inject runtime network profiles
+        mkdir -p files/etc/init.d
+        mkdir -p files/etc/uci-defaults
         
-        if [ -f "$TARGET_FILE" ]; then
-          # Modifies the definition titles so the build output shifts context strictly to JIDU6701
-          sed -i 's/DEVICE_MODEL := AX6000 JIDU6J01/DEVICE_MODEL := AX6000 JIDU6701/g' $TARGET_FILE
-          sed -i 's/JioRouter AX6000 JIDU6J01/JioRouter AX6000 JIDU6701/g' $TARGET_FILE
-          echo "Target patch successfully applied to 25.12 codebase!"
-        else
-          echo "Error: Target config layout changed or file not found!" && exit 1
-        fi
+        # Create an auto-run hook script that runs on the first boot to force the model identification string
+        cat << 'EOF' > files/etc/uci-defaults/99-force-jidu6701
+        #!/bin/sh
+        # Force system identification arrays to map specifically to your target router hardware model
+        uci set system.@system[0].hostname='JIDU6701'
+        uci set system.@system[0].model='JioRouter AX6000 JIDU6701'
+        uci commit system
+        exit 0
+        EOF
+        chmod +x files/etc/uci-defaults/99-force-jidu6701
 
     - name: Generate Custom Build Configuration (.config)
       run: |
         cd openwrt
-        # Define core targets first
+        # Define core targets exactly how the build architecture expects them to keep compilation clean
         echo "CONFIG_TARGET_mediatek=y" > .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jiorouter_ax6000=y" >> .config
         
-        # Expand core selections to populate dependency trees
+        # Expand core selections to populate dependency trees properly
         make defconfig
         
-        # Now force enable packages safely after tree expansion
+        # Force enable standard packages and UI applications safely after tree expansion
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
         
-        # Finalize schema structure validation
+        # Finalize structural validation
         make defconfig
 
     - name: Compile the Firmware
       run: |
         cd openwrt
         echo "Starting safe-mode toolchain compilation..."
-        
-        # 1. Build host tools safely using single-threading to eliminate deadlock container freezes
+        # Build host tools safely using single-threading to eliminate deadlock container freezes
         FORCE_UNSAFE_CONFIGURE=1 make tools/compile -j1 V=s || FORCE_UNSAFE_CONFIGURE=1 make tools/compile -j1 V=s
-        
-        # 2. Build the toolchain using full system power
+        # Build the toolchain using full system power
         FORCE_UNSAFE_CONFIGURE=1 make toolchain/compile -j$(nproc) V=s || FORCE_UNSAFE_CONFIGURE=1 make toolchain/compile -j1 V=s
-        
-        # 3. Compile all packages and target firmware images using maximum threads
+        # Compile all packages and target firmware images using maximum threads
         FORCE_UNSAFE_CONFIGURE=1 make -j$(nproc) V=s || FORCE_UNSAFE_CONFIGURE=1 make -j1 V=s
 
     - name: Upload Firmware to GitHub Actions
