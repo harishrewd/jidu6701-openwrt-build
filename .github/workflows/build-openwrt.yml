@@ -36,44 +36,31 @@ jobs:
           echo "✅ Compilation matrix set to generic Series tracking."
         fi
         
-        # 2. OVERWRITE 01_system script with dynamic runtime detection code
+        # 2. Safely generate the script file piece by piece using plain echo to completely avoid YAML syntax issues
         if [ -f "$BOARD_SCRIPT" ]; then
-          cat << 'EOF' > "$BOARD_SCRIPT"
-#!/bin/sh
-# Dynamic Jio Router Model Auto-Detection script for unified MediaTek profile
-
-. /lib/functions.sh
-. /lib/functions/system.sh
-
-jio_board_detect() {
-	local model
-	
-	# Attempt to read factory serial/model structures from programming block parameters
-	if [ -f /proc/device-tree/model ]; then
-		model=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0')
-	fi
-
-	# Fallback engine: Scan the system board environment block for custom Jio identifiers
-	# If factory calibration references variants like 6201/6401/6701/6801, display them
-	case "$model" in
-		*JIDU6201*) model="JioRouter AX6000 JIDU6201" ;;
-		*JIDU6401*) model="JioRouter AX6000 JIDU6401" ;;
-		*JIDU6601*) model="JioRouter AX6000 JIDU6601" ;;
-		*JIDU6701*) model="JioRouter AX6000 JIDU6701" ;;
-		*JIDU6801*) model="JioRouter AX6000 JIDU6801" ;;
-		*)
-			# Dynamic real-time fallback string if model registry is unified in device tree
-			model="JioRouter AX6000 JIDU6701 (Auto-Detected)"
-			;;
-	esac
-
-	mkdir -p /tmp/sysinfo
-	echo "jiorouter_ax6000-jidu6j01" > /tmp/sysinfo/board_name
-	echo "$model" > /tmp/sysinfo/model
-}
-
-UCIDEV_BOOTSTEP=jio_board_detect
-EOF
+          echo '#!/bin/sh' > "$BOARD_SCRIPT"
+          echo '# Dynamic Jio Router Model Auto-Detection script for unified MediaTek profile' >> "$BOARD_SCRIPT"
+          echo '. /lib/functions.sh' >> "$BOARD_SCRIPT"
+          echo '. /lib/functions/system.sh' >> "$BOARD_SCRIPT"
+          echo 'jio_board_detect() {' >> "$BOARD_SCRIPT"
+          echo '	local model' >> "$BOARD_SCRIPT"
+          echo '	if [ -f /proc/device-tree/model ]; then' >> "$BOARD_SCRIPT"
+          echo '		model=$(cat /proc/device-tree/model 2>/dev/null | tr -d "\0")' >> "$BOARD_SCRIPT"
+          echo '	fi' >> "$BOARD_SCRIPT"
+          echo '	case "$model" in' >> "$BOARD_SCRIPT"
+          echo '		*JIDU6201*) model="JioRouter AX6000 JIDU6201" ;;' >> "$BOARD_SCRIPT"
+          echo '		*JIDU6401*) model="JioRouter AX6000 JIDU6401" ;;' >> "$BOARD_SCRIPT"
+          echo '		*JIDU6601*) model="JioRouter AX6000 JIDU6601" ;;' >> "$BOARD_SCRIPT"
+          echo '		*JIDU6701*) model="JioRouter AX6000 JIDU6701" ;;' >> "$BOARD_SCRIPT"
+          echo '		*JIDU6801*) model="JioRouter AX6000 JIDU6801" ;;' >> "$BOARD_SCRIPT"
+          echo '		*) model="JioRouter AX6000 JIDU6701 (Auto-Detected)" ;;' >> "$BOARD_SCRIPT"
+          echo '	esac' >> "$BOARD_SCRIPT"
+          echo '	mkdir -p /tmp/sysinfo' >> "$BOARD_SCRIPT"
+          echo '	echo "jiorouter_ax6000-jidu6j01" > /tmp/sysinfo/board_name' >> "$BOARD_SCRIPT"
+          echo '	echo "$model" > /tmp/sysinfo/model' >> "$BOARD_SCRIPT"
+          echo '}' >> "$BOARD_SCRIPT"
+          echo 'UCIDEV_BOOTSTEP=jio_board_detect' >> "$BOARD_SCRIPT"
+          
           chmod +x "$BOARD_SCRIPT"
           echo "✅ Embedded hardware runtime lookup engine injected successfully into 01_system."
         fi
