@@ -1,5 +1,4 @@
-# Version 1.26.2-Automated-TrueARMv8Offload-RedisEnabled-r600 (Certified Hardened O2 Build)
-name: Compile JIDU 6701 + Complete Power-User Stack (Fixed Jio Target)
+name: Compile Clean Jio JIDU 6701 Stock-Style Firmware (v25.12.6)
 
 on:
   workflow_dispatch:
@@ -15,169 +14,61 @@ jobs:
     - name: Install Compiler Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
-          build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-          gettext git libncurses5-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev \
-          file wget zstd libz3-dev ccache
+        sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+        gettext git libncurses5-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev \
+        file wget zstd libz3-dev
 
     - name: Clone OpenWrt v25.12.6 Source
       run: |
-        git clone -b v25.12.6 https://github.com
+        git clone -b v25.12.6 https://github.com/openwrt/openwrt.git
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Hard-Coded Injection of True ARMv8 Hardware Assembly Flags into Unbound
+    - name: Inject Permanent JIDU 6701 Model Name
       run: |
-        MAKEFILE_PATH="openwrt/feeds/packages/net/unbound/Makefile"
-        
-        if [ -f "$MAKEFILE_PATH" ]; then
-          echo "⚙️ Tweaking specific package configuration parameter block for Unbound 1.26.1..."
-          sed -i 's|PKG_VERSION:=.*|PKG_VERSION:=1.26.1|g' "$MAKEFILE_PATH"
-          
-          # Corrected hash verification map matching the genuine 1.26.1 source tarball
-          sed -i 's|PKG_HASH:=.*|PKG_HASH:=35a6dc0e425a9282c3426d9a3043144011bf0534aed4b73ab62c52aee0af1503|g' "$MAKEFILE_PATH"
-          
-          sed -i 's|--enable-tfo-server|--enable-tfo-server \\\n\t--with-cflags="-O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53" \\\n\t--enable-cachedb \\\n\t--with-libhiredis=\$(STAGING_DIR)/usr|g' "$MAKEFILE_PATH"
-          sed -i 's|subnetcache ipset respip validator iterator|subnetcache ipset respip validator cachedb iterator|g' "$MAKEFILE_PATH"
-          sed -i 's|PKG_RELEASE:=.*|PKG_RELEASE:=700|g' "$MAKEFILE_PATH"
-          sed -i 's|\$(call Package/unbound/Default)|\$(call Package/unbound/Default)\n  DEPENDS+= +libhiredis|g' "$MAKEFILE_PATH"
-          sed -i 's|--enable-allsymbols||g' "$MAKEFILE_PATH"
-          sed -i '/include \$(INCLUDE_DIR)\/package\.mk/i TARGET_CFLAGS:=\$(filter-out -Os, \$(TARGET_CFLAGS)) -O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53\nEXTRA_CFLAGS:=\$(filter-out -Os, \$(EXTRA_CFLAGS)) -O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53' "$MAKEFILE_PATH"
-          echo "✅ Unbound Makefile modified successfully!"
-        else
-          echo "❌ Error: Unbound Makefile not found!" && exit 1
+        TARGET_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
+        BOARD_SCRIPT="openwrt/target/linux/mediatek/filogic/base-files/etc/board.d/01_system"
+        if [ -f "$TARGET_FILE" ]; then
+          sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU6701/g' "$TARGET_FILE"
+          echo "✅ Device metadata patched successfully."
+        fi
+        if [ -f "$BOARD_SCRIPT" ]; then
+          sed -i 's/JioRouter AX6000 JIDU6J01/JioRouter AX6000 JIDU6701/g' "$BOARD_SCRIPT"
+          echo "✅ Board initialization string updated successfully."
         fi
 
-    - name: Inject Permanent 6701 Model Name
-      run: |
-        # Replaces the default umbrella name block to brand your images explicitly for the 6701 hardware variation
-        sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU6701/g' openwrt/target/linux/mediatek/image/filogic.mk
-
-    - name: Configure Target Matrix and Add Power-User Stack
+    - name: Configure Target Matrix (True JIDU 6701 Firmware Selection)
       run: |
         cd openwrt
-        
-        # Completely clear old configurations to prevent default target values from leaking
         rm -f .config
         
-        # -----------------------------------------------------------------
-        # TRUE CORNERSTONE JIO JIDU BUILD PROFILE DEFINITIONS (FIXED IDENTIFIER)
-        # -----------------------------------------------------------------
+        # Select the master MediaTek Filogic target platform
         echo "CONFIG_TARGET_mediatek=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jiorouter_ax6000-jidu6j01=y" >> .config
         
-        # Forcefully unsetting the reference target blocks compilation fallbacks
-        echo "# CONFIG_TARGET_mediatek_filogic_DEVICE_openwrt_one is not set" >> .config
-        
-        # Structural layout variables matching the device target environment map
+        # Set up explicit target profile assignments to avoid config drift
         echo "CONFIG_HAS_SUBTARGETS=y" >> .config
         echo "CONFIG_TARGET_BOARD=\"mediatek\"" >> .config
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
         echo "CONFIG_TARGET_PROFILE=\"DEVICE_jiorouter_ax6000-jidu6j01\"" >> .config
         
-        # Enable Global Tree Cache
-        echo "CONFIG_DEVEL=y" >> .config
-        echo "CONFIG_CCACHE=y" >> .config
-
-        # Embed core graphical system tools
+        # Include baseline interface components
+        echo "CONFIG_PACKAGE_dnsmasq=y" >> .config
         echo "CONFIG_PACKAGE_luci=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
         
-        # -----------------------------------------------------------------
-        # DNSMASQ-FULL CONFIGURATION (Enforces removal of standard variant)
-        # -----------------------------------------------------------------
-        echo "# CONFIG_PACKAGE_dnsmasq is not set" >> .config
-        echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
-        echo "CONFIG_PACKAGE_dnsmasq_full_dhcp=y" >> .config
-        echo "CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y" >> .config
-        echo "CONFIG_PACKAGE_dnsmasq_full_nftset=y" >> .config
-        
-        # -----------------------------------------------------------------
-        # POWER-USER INTERFACE APPLICATIONS
-        # -----------------------------------------------------------------
-        echo "CONFIG_PACKAGE_wireguard-tools=y" >> .config
-        echo "CONFIG_PACKAGE_luci-app-wireguard=y" >> .config
-        echo "CONFIG_PACKAGE_pbr=y" >> .config
-        echo "CONFIG_PACKAGE_luci-app-pbr=y" >> .config
-        echo "CONFIG_PACKAGE_sqm-scripts=y" >> .config
-        echo "CONFIG_PACKAGE_luci-app-sqm=y" >> .config
-        
-        # -----------------------------------------------------------------
-        # 15-APK ACCELERATED UNBOUND 1.26.1 & CRYPTO SCHEME
-        # -----------------------------------------------------------------
-        echo "CONFIG_PACKAGE_unbound-daemon=y" >> .config
-        echo "CONFIG_PACKAGE_unbound-anchor=y" >> .config
-        echo "CONFIG_PACKAGE_unbound-checkconf=y" >> .config
-        echo "CONFIG_PACKAGE_unbound-control=y" >> .config
-        echo "CONFIG_PACKAGE_unbound-control-setup=y" >> .config
-        echo "CONFIG_PACKAGE_unbound-host=y" >> .config
-        echo "CONFIG_PACKAGE_luci-app-unbound=y" >> .config
-        echo "CONFIG_PACKAGE_libunbound_dnscrypt=y" >> .config
-        echo "CONFIG_PACKAGE_libunbound_ipset=y" >> .config
-        echo "CONFIG_PACKAGE_libunbound_libevent=y" >> .config
-        echo "CONFIG_PACKAGE_libunbound_libpthread=y" >> .config
-        echo "CONFIG_PACKAGE_libunbound_subnet=y" >> .config
-        
-        # Cryptographic dependencies linked to safexcel offloader
-        echo "CONFIG_PACKAGE_libopenssl=y" >> .config
-        echo "CONFIG_PACKAGE_libopenssl-conf=y" >> .config
-        echo "CONFIG_PACKAGE_openssl-util=y" >> .config
-        echo "CONFIG_PACKAGE_libopenssl-devcrypto=y" >> .config
-        echo "CONFIG_PACKAGE_wpad-openssl=y" >> .config
-        
-        # Essential platform database modules
-        echo "CONFIG_PACKAGE_libevent2=y" >> .config
-        echo "CONFIG_PACKAGE_libexpat=y" >> .config
-        echo "CONFIG_PACKAGE_libsodium=y" >> .config
-        echo "CONFIG_PACKAGE_libhiredis=y" >> .config
-        echo "CONFIG_PACKAGE_libmnl=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-crypto-hw-safexcel=y" >> .config 
-        
-        # Hard-set compilation optimizations across the global tree matrix
-        echo "CONFIG_TARGET_OPTIONS=y" >> .config
-        echo "CONFIG_TARGET_OPTIMIZATION=\"-O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53\"" >> .config
-        echo "CONFIG_EXTRA_OPTIMIZATION=\"\"" >> .config
-        
-        # Expands configuration trees and explicitly prevents falling back to alternative models
         make defconfig
 
-    - name: Setup Compiler Cache (ccache Instance)
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.ccache
-          ${{ github.workspace }}/openwrt/staging_dir/host/ccache
-        key: openwrt-jidu-6701-ccache-${{ github.run_id }}
-        restore-keys: |
-          openwrt-jidu-6701-ccache-
-
-    - name: Pre-compile Host Build Tools & Toolchain
+    - name: Compile Toolchain and Custom Firmware
       run: |
         cd openwrt
         export FORCE_UNSAFE_CONFIGURE=1
-        echo "🛠️ Pre-building independent compilation tools..."
-        make tools/compile -j$(nproc) || make tools/compile -j1 V=s
-        echo "🛠️ Pre-building cross-compilation toolchain components..."
-        make toolchain/compile -j$(nproc) || make toolchain/compile -j1 V=s
-
-    - name: Compile Custom Firmware Image Stack
-      run: |
-        cd openwrt
-        export FORCE_UNSAFE_CONFIGURE=1
-        
-        OPENSSL_MAKEFILE="package/libs/openssl/Makefile"
-        if [ -f "$OPENSSL_MAKEFILE" ]; then
-          sed -i '/include \$(INCLUDE_DIR)\/package\.mk/i TARGET_CFLAGS:=\$(filter-out -Os, \$(TARGET_CFLAGS)) -O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53\nEXTRA_CFLAGS:=\$(filter-out -Os, \$(EXTRA_CFLAGS)) -O2 -pipe -march=armv8-a+crc+crypto -mtune=cortex-a53' "$OPENSSL_MAKEFILE"
-          sed -i 's|OPENSSL_TARGET:=.*|OPENSSL_TARGET:=linux-aarch64|g' "$OPENSSL_MAKEFILE"
-        fi
-        
-        echo "🚀 Starting global firmware compile matrix..."
         make -j$(nproc) || make -j1 V=s
 
     - name: Upload Verified Jio Jidu 6701 Custom Firmware
       uses: actions/upload-artifact@v4
-      if: always()
       with:
         name: JIDU6701-OpenWrt-v25.12.6-TrueARMv8-Unbound-1.26.1
         path: |
