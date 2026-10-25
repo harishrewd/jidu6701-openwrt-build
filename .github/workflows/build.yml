@@ -65,7 +65,10 @@ jobs:
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
         echo "CONFIG_TARGET_PROFILE=\"DEVICE_jiorouter_ax6000-jidu6j01\"" >> .config
         
-        # Core Baseline Networking Package selection
+        # CRITICAL 40MHz FIX: Disables 20/40MHz coexistence checks in hostapd to force 40MHz width
+        echo "CONFIG_DRIVER_11N_2040_COEX=n" >> .config
+        
+        # Include baseline interface components
         echo "CONFIG_PACKAGE_dnsmasq=y" >> .config
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
