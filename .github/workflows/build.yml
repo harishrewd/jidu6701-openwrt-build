@@ -29,13 +29,24 @@ jobs:
       run: |
         TARGET_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
         BOARD_SCRIPT="openwrt/target/linux/mediatek/filogic/base-files/etc/board.d/01_system"
+        DTS_FILE="openwrt/target/linux/mediatek/dts/mt7986a-jiorouter-jidu6j01.dts"
+        
+        # 1. Update compilation metadata layout branding
         if [ -f "$TARGET_FILE" ]; then
           sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU6701/g' "$TARGET_FILE"
           echo "✅ Device metadata patched successfully."
         fi
+        
+        # 2. Update internal system fallback identification script
         if [ -f "$BOARD_SCRIPT" ]; then
           sed -i 's/JioRouter AX6000 JIDU6J01/JioRouter AX6000 JIDU6701/g' "$BOARD_SCRIPT"
           echo "✅ Board initialization string updated successfully."
+        fi
+        
+        # 3. CRITICAL DEVICE TREE FIX: Force the built kernel block to identify natively as 6701
+        if [ -f "$DTS_FILE" ]; then
+          sed -i 's/model = "JioRouter AX6000 JIDU6J01";/model = "JioRouter AX6000 JIDU6701";/g' "$DTS_FILE"
+          echo "✅ Device Tree hardware model string patched successfully."
         fi
 
     - name: Configure Target Matrix (True JIDU 6701 Firmware Selection)
@@ -43,18 +54,18 @@ jobs:
         cd openwrt
         rm -f .config
         
-        # Select the master MediaTek Filogic target platform
+        # Core Architecture Target Configuration for JioRouter
         echo "CONFIG_TARGET_mediatek=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jiorouter_ax6000-jidu6j01=y" >> .config
         
-        # Set up explicit target profile assignments to avoid config drift
+        # Profile assignments mapping block
         echo "CONFIG_HAS_SUBTARGETS=y" >> .config
         echo "CONFIG_TARGET_BOARD=\"mediatek\"" >> .config
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
         echo "CONFIG_TARGET_PROFILE=\"DEVICE_jiorouter_ax6000-jidu6j01\"" >> .config
         
-        # Include baseline interface components
+        # Core Baseline Networking Package selection
         echo "CONFIG_PACKAGE_dnsmasq=y" >> .config
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
