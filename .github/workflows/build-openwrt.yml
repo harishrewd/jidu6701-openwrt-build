@@ -25,6 +25,23 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
+    - name: Inject Native Board Detection Matrix (For LuCI Sync)
+      run: |
+        BOARD_DIR="openwrt/files/etc/board.d"
+        mkdir -p "$BOARD_DIR"
+        NET_FILE="$BOARD_DIR/02_network"
+        
+        echo '#!/bin/sh' > "$NET_FILE"
+        echo '# Native early platform configuration hook' >> "$NET_FILE"
+        echo 'if dmesg | grep -q "Setting dmesg designation to:"; then' >> "$NET_FILE"
+        echo '    DETECTED_MODEL=$(dmesg | grep "Setting dmesg designation to:" | sed '\''s/.*designation to: //'\'')' >> "$NET_FILE"
+        echo '    mkdir -p /tmp/sysinfo' >> "$NET_FILE"
+        echo '    echo "$DETECTED_MODEL" > /tmp/sysinfo/model' >> "$NET_FILE"
+        echo 'fi' >> "$NET_FILE"
+        
+        chmod +x "$NET_FILE"
+        echo "✅ LuCI web dashboard configuration matrix safely generated."
+
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
         cd openwrt
@@ -48,71 +65,49 @@ jobs:
     - name: Prepare Kernel Source Tree and Inject Early dmesg Modification
       run: |
         cd openwrt
-        
-        # 1. Force OpenWrt to extract the kernel source and apply all its standard patches first
         make target/linux/prepare
-        
-        # 2. Find the extracted mtdcore.c inside the active build directories
         MTD_CORE_FILE=$(find build_dir/target-*/linux-mediatek_filogic/linux-* -name mtdcore.c | head -n 1)
         
         if [ -n "$MTD_CORE_FILE" ] && [ -f "$MTD_CORE_FILE" ]; then
             echo "Found Kernel Storage Driver Source: $MTD_CORE_FILE"
             
-            # Create our driver hook block as a single string variable
-            HOOK_CODE='if (mtd->name && (strcmp(mtd->name, "MFG") == 0 || strcmp(mtd->name, "mfg") == 0)) {\
-                size_t retlen;\
-                unsigned char *buf = kzalloc(4096, GFP_KERNEL);\
-                if (buf) {\
-                    if (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {\
-                        char *match = strnstr((char *)buf, "device_model=", retlen);\
-                        if (match) {\
-                            char model_val[32] = {0};\
-                            char final_name[64] = {0};\
-                            if (sscanf(match, "device_model=%31s", model_val) == 1) {\
-                                snprintf(final_name, sizeof(final_name), "JioRouter AX6000 %s", model_val);\
-                                extern void dump_stack_set_arch_desc(const char *fmt, ...);\
-                                dump_stack_set_arch_desc("%s", final_name);\
-                                pr_info("Jio Platform Driver: Detected Hardware Variant in Flash -> Setting dmesg designation to: %s\\n", final_name);\
-                            }\
-                        }\
-                    }\
-                    kfree(buf);\
-                }\
-            }'
+            # Using absolute literal string inputs with awk to bypass shell escaping bugs entirely
+            awk '
+            /fail_added:/ {
+                print "\tif (mtd->name && (strcmp(mtd->name, \"MFG\") == 0 || strcmp(mtd->name, \"mfg\") == 0)) {"
+                print "\t\tsize_t retlen;"
+                print "\t\tunsigned char *buf = kzalloc(4096, GFP_KERNEL);"
+                print "\t\tif (buf) {"
+                print "\t\t\tif (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {"
+                print "\t\t\t\tchar *match = strnstr((char *)buf, \"device_model=\", retlen);"
+                print "\t\t\t\tif (match) {"
+                print "\t\t\t\t\tchar model_val[32] = {0};"
+                print "\t\t\t\t\tchar final_name[64] = {0};"
+                print "\t\t\t\t\tif (sscanf(match, \"device_model=%31s\", model_val) == 1) {"
+                print "\t\t\t\t\t\tsnprintf(final_name, sizeof(final_name), \"JioRouter AX6000 %s\", model_val);"
+                print "\t\t\t\t\t\textern void dump_stack_set_arch_desc(const char *fmt, ...);"
+                print "\t\t\t\t\t\tdump_stack_set_arch_desc(\"%s\", final_name);"
+                print "\t\t\t\t\t\tpr_info(\"Jio Platform Driver: Detected Hardware Variant in Flash -> Setting dmesg designation to: %s\\n\", final_name);"
+                print "\t\t\t\t\t}"
+                print "\t\t\t\t}"
+                print "\t\t\t}"
+                print "\t\t\tkfree(buf);"
+                print "\t\t}"
+                print "\t}"
+            }
+            { print }
+            ' "$MTD_CORE_FILE" > "${MTD_CORE_FILE}.tmp" && mv "${MTD_CORE_FILE}.tmp" "$MTD_CORE_FILE"
             
-            # Inject our hook natively directly inside the "add_mtd_device" function right above "return 0;"
-            sed -i "/fail_added:/i $HOOK_CODE" "$MTD_CORE_FILE"
-            echo "✅ C Driver Source Code safely modified inline for true dmesg identification."
+            echo "✅ C Driver Source Code safely modified inline with proper array parameters."
         else
             echo "❌ Error: Could not locate kernel source mtdcore.c text workspace."
             exit 1
         fi
 
-    - name: Inject Native Board Detection Matrix (For LuCI Sync)
-      run: |
-        BOARD_DIR="openwrt/files/etc/board.d"
-        mkdir -p "$BOARD_DIR"
-        NET_FILE="$BOARD_DIR/02_network"
-        
-        # Reads the dynamic string from the flash block to sync LuCI cleanly on startup
-        echo '#!/bin/sh' > "$NET_FILE"
-        echo '# Native early platform configuration hook' >> "$NET_FILE"
-        echo 'if [ -c "/dev/mtd6" ]; then' >> "$NET_FILE"
-        echo '    DETECTED_MODEL=$(dd if=/dev/mtd6 bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'=' -f2 | tr -d '\''[:space:]'\'')' >> "$NET_FILE"
-        echo '    if [ -n "$DETECTED_MODEL" ]; then' >> "$NET_FILE"
-        echo '        mkdir -p /tmp/sysinfo' >> "$NET_FILE"
-        echo '        echo "JioRouter AX6000 $DETECTED_MODEL" > /tmp/sysinfo/model' >> "$NET_FILE"
-        echo '    fi' >> "$NET_FILE"
-        echo 'fi' >> "$NET_FILE"
-        
-        chmod +x "$NET_FILE"
-        echo "✅ LuCI dashboard mapping script generated seamlessly."
-
     - name: Compile Toolchain and Custom Firmware
       run: |
         cd openwrt
         export FORCE_UNSAFE_CONFIGURE=1
-        # Compiles the pre-patched kernel directly into final firmware files
         make -j$(nproc) || make -j1 V=s
 
     - name: Upload Verified Jio Jidu Custom Firmware
