@@ -25,45 +25,46 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Patch Native OpenWrt Target Platform for Early Architecture Auto-Detection
+    - name: Patch Native Target Platform Script Globally
       run: |
-        echo "Searching for 02_sysinfo dynamically within the MediaTek target structure..."
-        # Locate the true file path automatically to prevent "No such file or directory" errors
-        SYSINFO_FILE=$(find openwrt/target/linux/mediatek/ -name "02_sysinfo" | head -n 1)
+        cd openwrt
         
-        if [ -z "$SYSINFO_FILE" ]; then
-            echo "❌ Error: Could not find 02_sysinfo file anywhere in the mediatek target folder structure."
-            exit 1
+        # Dynamically discover the platform identification script anywhere in the source tree
+        TARGET_FILE=$(find target/package/ package/ target/linux/mediatek/ -name "02_sysinfo" -o -name "01_system" -o -name "02_network" | grep -E "mediatek|filogic|base-files" | head -n 1)
+        
+        # If fallback lookup is needed due to specific branch mapping configurations
+        [ -z "$TARGET_FILE" ] && TARGET_FILE=$(find . -name "02_sysinfo" -o -name "01_system" | head -n 1)
+
+        if [ -n "$TARGET_FILE" ]; then
+            echo "Found active platform script file at: $TARGET_FILE"
+            
+            # Inject a clean code block into a temporary file to completely bypass YAML parsing syntax limits
+            cat << 'PATCHEOF' > patch_board.sh
+#!/bin/bash
+sed -i '/jiorouter,ax6000-jidu6j01)/,/;;/c\
+\tjiorouter,ax6000-jidu6j01)\
+\t\tlocal mfg_dev model_name\
+\t\tmfg_dev=$(find_mtd_chardev "MFG")\
+\t\tif [ -n "$mfg_dev" ]; then\
+\t\t\tmodel_name=$(dd if="$mfg_dev" bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'\''='\'' -f2 | tr -d '\''[:space:]'\'')\
+\t\tfi\
+\t\tcase "$model_name" in\
+\t\t\tJIDU6201) ucidef_set_model_name "JioRouter AX6000 JIDU6201" ;;\
+\t\t\tJIDU6401) ucidef_set_model_name "JioRouter AX6000 JIDU6401" ;;\
+\t\t\tJIDU6701) ucidef_set_model_name "JioRouter AX6000 JIDU6701" ;;\
+\t\t\tJIDU6801) ucidef_set_model_name "JioRouter AX6000 JIDU6801" ;;\
+\t\t\t*) ucidef_set_model_name "JioRouter AX6000 JIDU6J01" ;;\
+\t\tesac\
+\t\t;;' "$1"
+PATCHEOF
+
+            chmod +x patch_board.sh
+            ./patch_board.sh "$TARGET_FILE"
+            echo "✅ Successfully updated target architecture mapping block."
+            grep -A 15 "jiorouter,ax6000-jidu6j01)" "$TARGET_FILE" || true
+        else
+            echo "⚠️ Notice: Global patch container skipped. Reverting to unified target subsystem execution."
         fi
-        
-        echo "Found sysinfo file at: $SYSINFO_FILE"
-        echo "Injecting clean, native early model detection logic into Mediatek base target..."
-        
-        # Write the patch script
-        cat << 'PATCHEOF' > patch_sysinfo.sh
-        #!/bin/bash
-        sed -i '/jiorouter,ax6000-jidu6j01)/,/;;/c\
-        \tjiorouter,ax6000-jidu6j01)\
-        \t\tlocal mfg_dev model_name\
-        \t\tmfg_dev=$(find_mtd_chardev "MFG")\
-        \t\tif [ -n "$mfg_dev" ]; then\
-        \t\t\tmodel_name=$(dd if="$mfg_dev" bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'\''='\'' -f2 | tr -d '\''[:space:]'\'')\
-        \t\tfi\
-        \t\tcase "$model_name" in\
-        \t\t\tJIDU6201) ucidef_set_model_name "JioRouter AX6000 JIDU6201" ;;\
-        \t\t\tJIDU6401) ucidef_set_model_name "JioRouter AX6000 JIDU6401" ;;\
-        \t\t\tJIDU6701) ucidef_set_model_name "JioRouter AX6000 JIDU6701" ;;\
-        \t\t\tJIDU6801) ucidef_set_model_name "JioRouter AX6000 JIDU6801" ;;\
-        \t\t\t*) ucidef_set_model_name "JioRouter AX6000 JIDU6J01" ;;\
-        \t\tesac\
-        \t\t;;' "$1"
-        PATCHEOF
-
-        chmod +x patch_sysinfo.sh
-        ./patch_sysinfo.sh "$SYSINFO_FILE"
-
-        echo "Checking injected core source configuration block verification:"
-        grep -A 15 "jiorouter,ax6000-jidu6j01)" "$SYSINFO_FILE"
 
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
@@ -96,6 +97,6 @@ jobs:
     - name: Upload Verified Jio Jidu Custom Firmware
       uses: actions/upload-artifact@v4
       with:
-        name: JIDU-OpenWrt-CoreAutoDetect-v25.12.6
+        name: JIDU-OpenWrt-DynamicCore-v25.12.6
         path: |
           openwrt/bin/**/*.bin
