@@ -20,7 +20,6 @@ jobs:
 
     - name: Clone OpenWrt v25.12.6 Source
       run: |
-        # Fixed the URL to prevent compilation pipeline crashes
         git clone -b v25.12.6 https://github.com/openwrt/openwrt.git
         cd openwrt
         ./scripts/feeds update -a
@@ -32,25 +31,32 @@ jobs:
         
         echo "Injecting clean, native early model detection logic into Mediatek base target..."
         
-        # Rewrites the target profile block safely to pull values from the factory partition out-of-the-box
+        # Write out the patch logic directly to an isolated temporary file to solve YAML parsing issues
+        cat << 'PATCHEOF' > patch_sysinfo.sh
+        #!/bin/bash
         sed -i '/jiorouter,ax6000-jidu6j01)/,/;;/c\
-        jiorouter,ax6000-jidu6j01)\
-        \tlocal mfg_dev model_name\
-        \tmfg_dev=$(find_mtd_chardev "MFG")\
-        \tif [ -n "$mfg_dev" ]; then\
-        \t\tmodel_name=$(dd if="$mfg_dev" bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d\'=\' -f2 | tr -d \'[:space:]\')\
-        \tfi\
-        \tcase "$model_name" in\
-        \t\tJIDU6201) ucidef_set_model_name "JioRouter AX6000 JIDU6201" ;;\
-        \t\tJIDU6401) ucidef_set_model_name "JioRouter AX6000 JIDU6401" ;;\
-        \t\tJIDU6701) ucidef_set_model_name "JioRouter AX6000 JIDU6701" ;;\
-        \t\tJIDU6801) ucidef_set_model_name "JioRouter AX6000 JIDU6801" ;;\
-        \t\t*) ucidef_set_model_name "JioRouter AX6000 JIDU6J01" ;;\
-        \tesac\
-        \t;;' "$SYSINFO_FILE"
+        \tjiorouter,ax6000-jidu6j01)\
+        \t\tlocal mfg_dev model_name\
+        \t\tmfg_dev=$(find_mtd_chardev "MFG")\
+        \t\tif [ -n "$mfg_dev" ]; then\
+        \t\t\tmodel_name=$(dd if="$mfg_dev" bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'\''='\'' -f2 | tr -d '\''[:space:]'\'')\
+        \t\tfi\
+        \t\tcase "$model_name" in\
+        \t\t\tJIDU6201) ucidef_set_model_name "JioRouter AX6000 JIDU6201" ;;\
+        \t\t\tJIDU6401) ucidef_set_model_name "JioRouter AX6000 JIDU6401" ;;\
+        \t\t\tJIDU6701) ucidef_set_model_name "JioRouter AX6000 JIDU6701" ;;\
+        \t\t\tJIDU6801) ucidef_set_model_name "JioRouter AX6000 JIDU6801" ;;\
+        \t\t\t*) ucidef_set_model_name "JioRouter AX6000 JIDU6J01" ;;\
+        \t\tesac\
+        \t\t;;' "$1"
+        PATCHEOF
+
+        # Run our dedicated path string adjustment patch directly
+        chmod +x patch_sysinfo.sh
+        ./patch_sysinfo.sh "$SYSINFO_FILE"
 
         echo "Checking injected core source configuration block verification:"
-        grep -A 12 "jiorouter,ax6000-jidu6j01)" "$SYSINFO_FILE"
+        grep -A 15 "jiorouter,ax6000-jidu6j01)" "$SYSINFO_FILE"
 
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
