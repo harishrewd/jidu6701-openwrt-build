@@ -27,58 +27,65 @@ jobs:
 
     - name: Inject Custom Model Auto-Detection via Files Overlay
       run: |
-        # Define the exact destination folder structure in OpenWrt's custom files override directory
-        OVERLAY_DIR="openwrt/files/etc/board.d"
+        # Use OpenWrt's native files overlay to deposit a clean first-boot configuration hook
+        # This keeps the underlying source tree completely stock and clean
+        OVERLAY_DIR="openwrt/files/etc/uci-defaults"
         mkdir -p "$OVERLAY_DIR"
-        BOARD_SCRIPT="$OVERLAY_DIR/01_system"
+        DEFAULTS_SCRIPT="$OVERLAY_DIR/99-jio-model-detect"
         
-        # Write the dynamic lookup logic directly into our custom files overlay
-        # This leaves core firmware files untouched and only overrides the LuCI display value on boot
-        cat << 'EOF' > "$BOARD_SCRIPT"
+        cat << 'EOF' > "$DEFAULTS_SCRIPT"
         #!/bin/sh
-        . /lib/functions.sh
-        . /lib/functions/system.sh
         
-        jio_board_detect() {
-        	local raw_model=""
-        	
-        	if [ -f /proc/device-tree/model ]; then
-        		# Read raw hardware model string directly from the physical chip and drop null bytes cleanly
-        		raw_model=$(cat /proc/device-tree/model 2>/dev/null | tr -d "\0" | xargs)
-        	fi
-        	
-        	# Fallback default if parsing fails completely
-        	[ -z "$raw_model" ] && raw_model="JioRouter AX6000 JIDU6J01"
-        	
-        	mkdir -p /tmp/sysinfo
-        	echo "jiorouter_ax6000-jidu6j01" > /tmp/sysinfo/board_name
-        	echo "$raw_model" > /tmp/sysinfo/model
-        }
+        local raw_model=""
+        local final_name="JioRouter AX6000 JIDU6J01"
+
+        # Safe read-only identification scan directly from the factory MFG partition
+        if [ -c "/dev/mtd6" ]; then
+            raw_model=$(dd if="/dev/mtd6" bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'=' -f2 | tr -d '[:space:]')
+        fi
+
+        case "$raw_model" in
+            JIDU6201) final_name="JioRouter AX6000 JIDU6201" ;;
+            JIDU6401) final_name="JioRouter AX6000 JIDU6401" ;;
+            JIDU6701) final_name="JioRouter AX6000 JIDU6701" ;;
+            JIDU6801) final_name="JioRouter AX6000 JIDU6801" ;;
+            *) 
+                if [ -n "$raw_model" ]; then
+                    final_name="JioRouter AX6000 $raw_model"
+                fi
+                ;;
+        esac
+
+        # Set the volatile memory tag immediately for the first-boot rendering
+        mkdir -p /tmp/sysinfo
+        echo "$final_name" > /tmp/sysinfo/model
         
-        # Force execution immediately during initialization loop evaluation
-        jio_board_detect
+        # Commit the true model configuration permanently into the system parameters database
+        uci set system.@system[0].model="$final_name"
+        uci commit system
+        
+        exit 0
         EOF
         
-        chmod +x "$BOARD_SCRIPT"
-        echo "✅ Safe user-space model mapping script injected into files/ overlay."
+        chmod +x "$DEFAULTS_SCRIPT"
+        echo "✅ First-boot uci-defaults override configuration script generated in files/ overlay."
 
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
         cd openwrt
         rm -f .config
         
-        # Core Architecture Target Configuration for JioRouter
+        # Select official architecture targets for Mediatek Filogic / JioRouter
         echo "CONFIG_TARGET_mediatek=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jiorouter_ax6000-jidu6j01=y" >> .config
         
-        # Profile assignments mapping block
         echo "CONFIG_HAS_SUBTARGETS=y" >> .config
         echo "CONFIG_TARGET_BOARD=\"mediatek\"" >> .config
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
         echo "CONFIG_TARGET_PROFILE=\"DEVICE_jiorouter_ax6000-jidu6j01\"" >> .config
         
-        # Include baseline interface components
+        # Include baseline user interface web interface components
         echo "CONFIG_PACKAGE_dnsmasq=y" >> .config
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
@@ -94,6 +101,6 @@ jobs:
     - name: Upload Verified Jio Jidu Custom Firmware
       uses: actions/upload-artifact@v4
       with:
-        name: JIO-JIDU-OpenWrt-AutoDetect-v25.12.6
+        name: JIDU-OpenWrt-AutoDetect-StockRadio-v25.12.6
         path: |
           openwrt/bin/**/*.bin
