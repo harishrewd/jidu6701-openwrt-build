@@ -33,10 +33,12 @@ jobs:
         
         echo '#!/bin/sh' > "$NET_FILE"
         echo '# Native early platform configuration hook' >> "$NET_FILE"
-        echo 'if dmesg | grep -q "Setting dmesg designation to:"; then' >> "$NET_FILE"
-        echo '    DETECTED_MODEL=$(dmesg | grep "Setting dmesg designation to:" | sed '\''s/.*designation to: //'\'')' >> "$NET_FILE"
-        echo '    mkdir -p /tmp/sysinfo' >> "$NET_FILE"
-        echo '    echo "$DETECTED_MODEL" > /tmp/sysinfo/model' >> "$NET_FILE"
+        echo 'if [ -c "/dev/mtd6" ]; then' >> "$NET_FILE"
+        echo '    DETECTED_MODEL=$(dd if=/dev/mtd6 bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'=' -f2 | tr -d '\''[:space:]'\'')' >> "$NET_FILE"
+        echo '    if [ -n "$DETECTED_MODEL" ]; then' >> "$NET_FILE"
+        echo '        mkdir -p /tmp/sysinfo' >> "$NET_FILE"
+        echo '        echo "JioRouter AX6000 $DETECTED_MODEL" > /tmp/sysinfo/model' >> "$NET_FILE"
+        echo '    fi' >> "$NET_FILE"
         echo 'fi' >> "$NET_FILE"
         
         chmod +x "$NET_FILE"
@@ -65,42 +67,33 @@ jobs:
     - name: Prepare Kernel Source Tree and Inject Early dmesg Modification
       run: |
         cd openwrt
+        
+        # 1. Force OpenWrt to extract kernel source and apply standard platform updates
         make target/linux/prepare
+        
+        # 2. Locate the extracted mtdcore.c source workspace file
         MTD_CORE_FILE=$(find build_dir/target-*/linux-mediatek_filogic/linux-* -name mtdcore.c | head -n 1)
         
         if [ -n "$MTD_CORE_FILE" ] && [ -f "$MTD_CORE_FILE" ]; then
             echo "Found Kernel Storage Driver Source: $MTD_CORE_FILE"
             
-            # Using absolute literal string inputs with awk to bypass shell escaping bugs entirely
-            awk '
-            /fail_added:/ {
-                print "\tif (mtd->name && (strcmp(mtd->name, \"MFG\") == 0 || strcmp(mtd->name, \"mfg\") == 0)) {"
-                print "\t\tsize_t retlen;"
-                print "\t\tunsigned char *buf = kzalloc(4096, GFP_KERNEL);"
-                print "\t\tif (buf) {"
-                print "\t\t\tif (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {"
-                print "\t\t\t\tchar *match = strnstr((char *)buf, \"device_model=\", retlen);"
-                print "\t\t\t\tif (match) {"
-                print "\t\t\t\t\tchar model_val[32] = {0};"
-                print "\t\t\t\t\tchar final_name[64] = {0};"
-                print "\t\t\t\t\tif (sscanf(match, \"device_model=%31s\", model_val) == 1) {"
-                print "\t\t\t\t\t\tsnprintf(final_name, sizeof(final_name), \"JioRouter AX6000 %s\", model_val);"
-                print "\t\t\t\t\t\textern void dump_stack_set_arch_desc(const char *fmt, ...);"
-                print "\t\t\t\t\t\tdump_stack_set_arch_desc(\"%s\", final_name);"
-                print "\t\t\t\t\t\tpr_info(\"Jio Platform Driver: Detected Hardware Variant in Flash -> Setting dmesg designation to: %s\\n\", final_name);"
-                print "\t\t\t\t\t}"
-                print "\t\t\t\t}"
-                print "\t\t\t}"
-                print "\t\t\tkfree(buf);"
-                print "\t\t}"
-                print "\t}"
-            }
-            { print }
-            ' "$MTD_CORE_FILE" > "${MTD_CORE_FILE}.tmp" && mv "${MTD_CORE_FILE}.tmp" "$MTD_CORE_FILE"
+            # 3. Clean string structure using absolute literal echo configurations to protect string layouts
+            echo 'import sys' > patch_helper.py
+            echo 'target_file = sys.argv[1]' >> patch_helper.py
+            echo 'with open(target_file, "r") as f: content = f.read()' >> patch_helper.py
             
-            echo "✅ C Driver Source Code safely modified inline with proper array parameters."
+            # Escape strings safely to make certain raw strings match the variable format flawlessly
+            echo 'hook_code = """\tif (mtd->name && (strcmp(mtd->name, "MFG") == 0 || strcmp(mtd->name, "mfg") == 0)) {\n\t\tsize_t retlen;\n\t\tunsigned char *buf = kzalloc(4096, GFP_KERNEL);\n\t\tif (buf) {\n\t\t\tif (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {\n\t\t\t\tchar *match = strnstr((char *)buf, "device_model=", retlen);\n\t\t\t\tif (match) {\n\t\t\t\t\tchar model_val[32] = {0};\n\t\t\t\t\tchar final_name[64] = {0};\n\t\t\t\t\tif (sscanf(match, "device_model=%31s", model_val) == 1) {\n\t\t\t\t\t\tsnprintf(final_name, sizeof(final_name), "JioRouter AX6000 %s", model_val);\n\t\t\t\t\t\textern void dump_stack_set_arch_desc(const char *fmt, ...);\n\t\t\t\t\t\tdump_stack_set_arch_desc("%s", final_name);\n\t\t\t\t\t\tpr_info("Jio Platform Driver: Detected Hardware Variant in Flash -> Setting dmesg designation to: %s\\n", final_name);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t\tkfree(buf);\n\t\t}\n\t}\n\nfail_added:"""' >> patch_helper.py
+            
+            echo 'if "fail_added:" in content and "Jio Platform Driver" not in content:' >> patch_helper.py
+            echo '    content = content.replace("fail_added:", hook_code)' >> patch_helper.py
+            echo '    with open(target_file, "w") as f: f.write(content)' >> patch_helper.py
+            echo '    print("✅ File structured successfully.")' >> patch_helper.py
+            
+            python3 patch_helper.py "$MTD_CORE_FILE"
+            rm patch_helper.py
         else
-            echo "❌ Error: Could not locate kernel source mtdcore.c text workspace."
+            echo "❌ Error: Could not locate kernel source target files workspace."
             exit 1
         fi
 
