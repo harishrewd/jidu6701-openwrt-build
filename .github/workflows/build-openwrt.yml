@@ -1,11 +1,11 @@
-name: Compile Clean Jio JIDU Auto-Detect Custom-Radio Firmware (v25.12.6)
+workflow-name: Compile Clean Jio JIDU Auto-Detect Stock-Style Firmware (v25.12.6)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout Repository
@@ -25,45 +25,50 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Inject Dynamic Model Auto-Detection Code
+    - name: Inject Custom Model Auto-Detection via Files Overlay
       run: |
-        TARGET_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
-        BOARD_SCRIPT="openwrt/target/linux/mediatek/filogic/base-files/etc/board.d/01_system"
+        # Define the exact destination folder structure in OpenWrt's custom files override directory
+        OVERLAY_DIR="openwrt/files/etc/board.d"
+        mkdir -p "$OVERLAY_DIR"
+        BOARD_SCRIPT="$OVERLAY_DIR/01_system"
         
-        # 1. Update image generation build flags generically
+        # 1. Update the compile-time image definition string
+        TARGET_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
         if [ -f "$TARGET_FILE" ]; then
           sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU Series/g' "$TARGET_FILE"
           echo "✅ Compilation matrix set to generic Series tracking."
         fi
         
-        # 2. Safely generate the script file piece by piece using plain echo to completely avoid YAML syntax issues
-        if [ -f "$BOARD_SCRIPT" ]; then
-          echo '#!/bin/sh' > "$BOARD_SCRIPT"
-          echo '# Dynamic Jio Router Model Auto-Detection script for unified MediaTek profile' >> "$BOARD_SCRIPT"
-          echo '. /lib/functions.sh' >> "$BOARD_SCRIPT"
-          echo '. /lib/functions/system.sh' >> "$BOARD_SCRIPT"
-          echo 'jio_board_detect() {' >> "$BOARD_SCRIPT"
-          echo '	local model' >> "$BOARD_SCRIPT"
-          echo '	if [ -f /proc/device-tree/model ]; then' >> "$BOARD_SCRIPT"
-          echo '		model=$(cat /proc/device-tree/model 2>/dev/null | tr -d "\0")' >> "$BOARD_SCRIPT"
-          echo '	fi' >> "$BOARD_SCRIPT"
-          echo '	case "$model" in' >> "$BOARD_SCRIPT"
-          echo '		*JIDU6201*) model="JioRouter AX6000 JIDU6201" ;;' >> "$BOARD_SCRIPT"
-          echo '		*JIDU6401*) model="JioRouter AX6000 JIDU6401" ;;' >> "$BOARD_SCRIPT"
-          echo '		*JIDU6601*) model="JioRouter AX6000 JIDU6601" ;;' >> "$BOARD_SCRIPT"
-          echo '		*JIDU6701*) model="JioRouter AX6000 JIDU6701" ;;' >> "$BOARD_SCRIPT"
-          echo '		*JIDU6801*) model="JioRouter AX6000 JIDU6801" ;;' >> "$BOARD_SCRIPT"
-          echo '		*) model="JioRouter AX6000 JIDU6701 (Auto-Detected)" ;;' >> "$BOARD_SCRIPT"
-          echo '	esac' >> "$BOARD_SCRIPT"
-          echo '	mkdir -p /tmp/sysinfo' >> "$BOARD_SCRIPT"
-          echo '	echo "jiorouter_ax6000-jidu6j01" > /tmp/sysinfo/board_name' >> "$BOARD_SCRIPT"
-          echo '	echo "$model" > /tmp/sysinfo/model' >> "$BOARD_SCRIPT"
-          echo '}' >> "$BOARD_SCRIPT"
-          echo 'UCIDEV_BOOTSTEP=jio_board_detect' >> "$BOARD_SCRIPT"
-          
-          chmod +x "$BOARD_SCRIPT"
-          echo "✅ Embedded hardware runtime lookup engine injected successfully into 01_system."
-        fi
+        # 2. Write the detection logic cleanly directly into our custom files overlay
+        cat << 'EOF' > "$BOARD_SCRIPT"
+        #!/bin/sh
+        # Dynamic Jio Router Model Auto-Detection script for unified MediaTek profile
+        . /lib/functions.sh
+        . /lib/functions/system.sh
+        
+        jio_board_detect() {
+        	local model
+        	if [ -f /proc/device-tree/model ]; then
+        		model=$(cat /proc/device-tree/model 2>/dev/null | tr -d "\0")
+        	fi
+        	case "$model" in
+        		*JIDU6201*) model="JioRouter AX6000 JIDU6201" ;;
+        		*JIDU6401*) model="JioRouter AX6000 JIDU6401" ;;
+        		*JIDU6601*) model="JioRouter AX6000 JIDU6601" ;;
+        		*JIDU6701*) model="JioRouter AX6000 JIDU6701" ;;
+        		*JIDU6801*) model="JioRouter AX6000 JIDU6801" ;;
+        		*) model="JioRouter AX6000 JIDU6701 (Auto-Detected)" ;;
+        	esac
+        	mkdir -p /tmp/sysinfo
+        	echo "jiorouter_ax6000-jidu6j01" > /tmp/sysinfo/board_name
+        	echo "$model" > /tmp/sysinfo/model
+        }
+        
+        UCIDEV_BOOTSTEP=jio_board_detect
+        EOF
+        
+        chmod +x "$BOARD_SCRIPT"
+        echo "✅ Embedded hardware runtime lookup engine injected successfully into files/ overlay."
 
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
@@ -81,9 +86,6 @@ jobs:
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
         echo "CONFIG_TARGET_PROFILE=\"DEVICE_jiorouter_ax6000-jidu6j01\"" >> .config
         
-        # CRITICAL 40MHz FIX: Disables 20/40MHz coexistence checks in hostapd to force 40MHz width
-        echo "CONFIG_DRIVER_11N_2040_COEX=n" >> .config
-        
         # Include baseline interface components
         echo "CONFIG_PACKAGE_dnsmasq=y" >> .config
         echo "CONFIG_PACKAGE_luci=y" >> .config
@@ -100,6 +102,6 @@ jobs:
     - name: Upload Verified Jio Jidu Custom Firmware
       uses: actions/upload-artifact@v4
       with:
-        name: JIDU-OpenWrt-AutoDetect-40MHzUnlocked-v25.12.6
+        name: JIDU-OpenWrt-AutoDetect-StockRadio-v25.12.6
         path: |
           openwrt/bin/**/*.bin
