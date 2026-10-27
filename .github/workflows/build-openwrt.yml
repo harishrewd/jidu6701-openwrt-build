@@ -20,7 +20,7 @@ jobs:
 
     - name: Clone OpenWrt v25.12.6 Source
       run: |
-        git clone -b v25.12.6 https://github.com/openwrt/openwrt.git
+        git clone -b v25.12.6 https://github.com/openwrt/opewnrt.git
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
@@ -67,33 +67,50 @@ jobs:
     - name: Prepare Kernel Source Tree and Inject Early dmesg Modification
       run: |
         cd openwrt
-        
-        # 1. Force OpenWrt to extract kernel source and apply standard platform updates
         make target/linux/prepare
-        
-        # 2. Locate the extracted mtdcore.c source workspace file
         MTD_CORE_FILE=$(find build_dir/target-*/linux-mediatek_filogic/linux-* -name mtdcore.c | head -n 1)
         
         if [ -n "$MTD_CORE_FILE" ] && [ -f "$MTD_CORE_FILE" ]; then
             echo "Found Kernel Storage Driver Source: $MTD_CORE_FILE"
             
-            # 3. Clean string structure using absolute literal echo configurations to protect string layouts
-            echo 'import sys' > patch_helper.py
-            echo 'target_file = sys.argv[1]' >> patch_helper.py
-            echo 'with open(target_file, "r") as f: content = f.read()' >> patch_helper.py
+            # Generating the patch script cleanly using an array to prevent red visual editor lines
+            echo "import sys" > patch_helper.py
+            echo "target_file = sys.argv[1]" >> patch_helper.py
+            echo "with open(target_file, 'r') as f: content = f.read()" >> patch_helper.py
             
-            # Escape strings safely to make certain raw strings match the variable format flawlessly
-            echo 'hook_code = """\tif (mtd->name && (strcmp(mtd->name, "MFG") == 0 || strcmp(mtd->name, "mfg") == 0)) {\n\t\tsize_t retlen;\n\t\tunsigned char *buf = kzalloc(4096, GFP_KERNEL);\n\t\tif (buf) {\n\t\t\tif (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {\n\t\t\t\tchar *match = strnstr((char *)buf, "device_model=", retlen);\n\t\t\t\tif (match) {\n\t\t\t\t\tchar model_val[32] = {0};\n\t\t\t\t\tchar final_name[64] = {0};\n\t\t\t\t\tif (sscanf(match, "device_model=%31s", model_val) == 1) {\n\t\t\t\t\t\tsnprintf(final_name, sizeof(final_name), "JioRouter AX6000 %s", model_val);\n\t\t\t\t\t\textern void dump_stack_set_arch_desc(const char *fmt, ...);\n\t\t\t\t\t\tdump_stack_set_arch_desc("%s", final_name);\n\t\t\t\t\t\tpr_info("Jio Platform Driver: Detected Hardware Variant in Flash -> Setting dmesg designation to: %s\\n", final_name);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t\tkfree(buf);\n\t\t}\n\t}\n\nfail_added:"""' >> patch_helper.py
+            echo "lines = [" >> patch_helper.py
+            echo "    '\tif (mtd->name && (strcmp(mtd->name, \"MFG\") == 0 || strcmp(mtd->name, \"mfg\") == 0)) {'," >> patch_helper.py
+            echo "    '\t\tsize_t retlen;'," >> patch_helper.py
+            echo "    '\t\tunsigned char *buf = kzalloc(4096, GFP_KERNEL);'," >> patch_helper.py
+            echo "    '\t\tif (buf) {'," >> patch_helper.py
+            echo "    '\t\t\tif (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {'," >> patch_helper.py
+            echo "    '\t\t\t\tchar *match = strnstr((char *)buf, \"device_model=\", retlen);'," >> patch_helper.py
+            echo "    '\t\t\t\tif (match) {'," >> patch_helper.py
+            echo "    '\t\t\t\t\tchar model_val[32] = {0};'," >> patch_helper.py
+            echo "    '\t\t\t\t\tchar final_name[64] = {0};'," >> patch_helper.py
+            echo "    '\t\t\t\t\tif (sscanf(match, \"device_model=%31s\", model_val) == 1) {'," >> patch_helper.py
+            echo "    '\t\t\t\t\t\tsnprintf(final_name, sizeof(final_name), \"JioRouter AX6000 %s\", model_val);'," >> patch_helper.py
+            echo "    '\t\t\t\t\t\tpr_info(\"Setting dmesg designation to: %s\\\n\", final_name);'," >> patch_helper.py
+            echo "    '\t\t\t\t\t}'," >> patch_helper.py
+            echo "    '\t\t\t\t}'," >> patch_helper.py
+            echo "    '\t\t\t}'," >> patch_helper.py
+            echo "    '\t\t\tkfree(buf);'," >> patch_helper.py
+            echo "    '\t\t}'," >> patch_helper.py
+            echo "    '\t}'," >> patch_helper.py
+            echo "    '',' >> patch_helper.py
+            echo "    'fail_added:'" >> patch_helper.py
+            echo "]" >> patch_helper.py
             
-            echo 'if "fail_added:" in content and "Jio Platform Driver" not in content:' >> patch_helper.py
-            echo '    content = content.replace("fail_added:", hook_code)' >> patch_helper.py
-            echo '    with open(target_file, "w") as f: f.write(content)' >> patch_helper.py
-            echo '    print("✅ File structured successfully.")' >> patch_helper.py
+            echo "hook_code = '\n'.join(lines)" >> patch_helper.py
+            echo "if 'fail_added:' in content and 'Setting dmesg designation' not in content:" >> patch_helper.py
+            echo "    content = content.replace('fail_added:', hook_code)" >> patch_helper.py
+            echo "    with open(target_file, 'w') as f: f.write(content)" >> patch_helper.py
+            echo "    print('✅ Complete success.')" >> patch_helper.py
             
             python3 patch_helper.py "$MTD_CORE_FILE"
             rm patch_helper.py
         else
-            echo "❌ Error: Could not locate kernel source target files workspace."
+            echo "❌ Error: Could not locate kernel source target workspace."
             exit 1
         fi
 
