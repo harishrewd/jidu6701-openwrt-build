@@ -25,53 +25,78 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Patch Native Target Platform Script Globally
+    - name: Inject Early dmesg Flash Detection Patch
       run: |
-        cd openwrt
+        TARGET_PATCH_DIR="openwrt/target/linux/mediatek/patches-6.12"
+        mkdir -p "$TARGET_PATCH_DIR"
         
-        # Dynamically discover the platform identification script anywhere in the source tree
-        TARGET_FILE=$(find target/package/ package/ target/linux/mediatek/ -name "02_sysinfo" -o -name "01_system" -o -name "02_network" | grep -E "mediatek|filogic|base-files" | head -n 1)
+        cat << 'EOF' > "$TARGET_PATCH_DIR/999-jio-mfg-dmesg-override.patch"
+--- a/drivers/mtd/mtdcore.c
++++ b/drivers/mtd/mtdcore.c
+@@ -31,6 +31,7 @@
+ #include <linux/reboot.h>
+ #include <linux/leds.h>
+ #include <linux/debugfs.h>
++#include <linux/string.h>
+ 
+ #include <linux/mtd/mtd.h>
+ #include <linux/mtd/partitions.h>
+@@ -945,6 +946,28 @@ int add_mtd_device(struct mtd_info *mtd)
+ 	if (mtd->dev.parent)
+ 		device_link_add(&mtd->dev, mtd->dev.parent, DL_FLAG_STATELESS);
+ 
++	if (strcmp(mtd->name, "MFG") == 0 || strcmp(mtd->name, "mfg") == 0) {
++		size_t retlen;
++		unsigned char *buf = kmalloc(4096, GFP_KERNEL);
++		if (buf) {
++			if (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {
++				buf[retlen - 1] = '\0';
++				char *match = strnstr((char *)buf, "device_model=", retlen);
++				if (match) {
++					char model_val[32] = {0};
++					char final_name[64] = {0};
++					if (sscanf(match, "device_model=%31s", model_val) == 1) {
++						snprintf(final_name, sizeof(final_name), "JioRouter AX6000 %s", model_val);
++						extern void dump_stack_set_arch_desc(const char *fmt, ...);
++						dump_stack_set_arch_desc("%s", final_name);
++						pr_info("Jio Platform Driver: Detected Hardware Variant in Flash -> Setting dmesg designation to: %s\n", final_name);
++					}
++				}
++			}
++			kfree(buf);
++		}
++	}
++
+ 	return 0;
+ 
+ fail_added:
+EOF
+        echo "✅ Early-boot dmesg storage patch cleanly injected into kernel tree."
+
+    - name: Inject Native Board Detection Matrix (For LuCI Sync)
+      run: |
+        BOARD_DIR="openwrt/files/etc/board.d"
+        mkdir -p "$BOARD_DIR"
         
-        # If fallback lookup is needed due to specific branch mapping configurations
-        [ -z "$TARGET_FILE" ] && TARGET_FILE=$(find . -name "02_sysinfo" -o -name "01_system" | head -n 1)
+        cat << 'EOF' > "$BOARD_DIR/02_network"
+#!/bin/sh
+# Native early platform configuration hook
 
-        if [ -n "$TARGET_FILE" ]; then
-            echo "Found active platform script file at: $TARGET_FILE"
-            
-            # Inject a clean code block into a temporary file to completely bypass YAML parsing syntax limits
-            cat << 'PATCHEOF' > patch_board.sh
-#!/bin/bash
-sed -i '/jiorouter,ax6000-jidu6j01)/,/;;/c\
-\tjiorouter,ax6000-jidu6j01)\
-\t\tlocal mfg_dev model_name\
-\t\tmfg_dev=$(find_mtd_chardev "MFG")\
-\t\tif [ -n "$mfg_dev" ]; then\
-\t\t\tmodel_name=$(dd if="$mfg_dev" bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'\''='\'' -f2 | tr -d '\''[:space:]'\'')\
-\t\tfi\
-\t\tcase "$model_name" in\
-\t\t\tJIDU6201) ucidef_set_model_name "JioRouter AX6000 JIDU6201" ;;\
-\t\t\tJIDU6401) ucidef_set_model_name "JioRouter AX6000 JIDU6401" ;;\
-\t\t\tJIDU6701) ucidef_set_model_name "JioRouter AX6000 JIDU6701" ;;\
-\t\t\tJIDU6801) ucidef_set_model_name "JioRouter AX6000 JIDU6801" ;;\
-\t\t\t*) ucidef_set_model_name "JioRouter AX6000 JIDU6J01" ;;\
-\t\tesac\
-\t\t;;' "$1"
-PATCHEOF
-
-            chmod +x patch_board.sh
-            ./patch_board.sh "$TARGET_FILE"
-            echo "✅ Successfully updated target architecture mapping block."
-            grep -A 15 "jiorouter,ax6000-jidu6j01)" "$TARGET_FILE" || true
-        else
-            echo "⚠️ Notice: Global patch container skipped. Reverting to unified target subsystem execution."
-        fi
+if dmesg | grep -q "Setting dmesg designation to:"; then
+    DETECTED_MODEL=$(dmesg | grep "Setting dmesg designation to:" | sed 's/.*designation to: //')
+    mkdir -p /tmp/sysinfo
+    echo "$DETECTED_MODEL" > /tmp/sysinfo/model
+fi
+EOF
+        
+        chmod +x "$BOARD_DIR/02_network"
+        echo "✅ LuCI web dashboard sync integrated directly into native early platform initialization."
 
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
         cd openwrt
         rm -f .config
         
-        # Select official architecture targets for Mediatek Filogic / JioRouter
         echo "CONFIG_TARGET_mediatek=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic_DEVICE_jiorouter_ax6000-jidu6j01=y" >> .config
@@ -81,7 +106,6 @@ PATCHEOF
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
         echo "CONFIG_TARGET_PROFILE=\"DEVICE_jiorouter_ax6000-jidu6j01\"" >> .config
         
-        # Include baseline user interface components
         echo "CONFIG_PACKAGE_dnsmasq=y" >> .config
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
@@ -97,6 +121,6 @@ PATCHEOF
     - name: Upload Verified Jio Jidu Custom Firmware
       uses: actions/upload-artifact@v4
       with:
-        name: JIDU-OpenWrt-DynamicCore-v25.12.6
+        name: JIDU-OpenWrt-AutoDetect-StockRadio-v25.12.6
         path: |
           openwrt/bin/**/*.bin
