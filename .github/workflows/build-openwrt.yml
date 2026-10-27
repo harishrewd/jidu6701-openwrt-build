@@ -25,72 +25,6 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Inject Early dmesg Flash Detection Patch
-      run: |
-        TARGET_PATCH_DIR="openwrt/target/linux/mediatek/patches-6.12"
-        mkdir -p "$TARGET_PATCH_DIR"
-        PATCH_FILE="$TARGET_PATCH_DIR/999-jio-mfg-dmesg-override.patch"
-        
-        # Writing the patch line-by-line using safe echo overrides to prevent EOF truncation bugs
-        echo '--- a/drivers/mtd/mtdcore.c' > "$PATCH_FILE"
-        echo '+++ b/drivers/mtd/mtdcore.c' >> "$PATCH_FILE"
-        echo '@@ -31,6 +31,7 @@' >> "$PATCH_FILE"
-        echo ' #include <linux/reboot.h>' >> "$PATCH_FILE"
-        echo ' #include <linux/leds.h>' >> "$PATCH_FILE"
-        echo ' #include <linux/debugfs.h>' >> "$PATCH_FILE"
-        echo '+#include <linux/string.h>' >> "$PATCH_FILE"
-        echo ' ' >> "$PATCH_FILE"
-        echo ' #include <linux/mtd/mtd.h>' >> "$PATCH_FILE"
-        echo ' #include <linux/mtd/partitions.h>' >> "$PATCH_FILE"
-        echo '@@ -945,6 +946,28 @@ int add_mtd_device(struct mtd_info *mtd)' >> "$PATCH_FILE"
-        echo ' 	if (mtd->dev.parent)' >> "$PATCH_FILE"
-        echo ' 		device_link_add(&mtd->dev, mtd->dev.parent, DL_FLAG_STATELESS);' >> "$PATCH_FILE"
-        echo ' ' >> "$PATCH_FILE"
-        echo '+	if (strcmp(mtd->name, "MFG") == 0 || strcmp(mtd->name, "mfg") == 0) {' >> "$PATCH_FILE"
-        echo '+		size_t retlen;' >> "$PATCH_FILE"
-        echo '+		unsigned char *buf = kmalloc(4096, GFP_KERNEL);' >> "$PATCH_FILE"
-        echo '+		if (buf) {' >> "$PATCH_FILE"
-        echo '+			if (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {' >> "$PATCH_FILE"
-        echo '+				buf[retlen - 1] = '\''\0'\'';' >> "$PATCH_FILE"
-        echo '+				char *match = strnstr((char *)buf, "device_model=", retlen);' >> "$PATCH_FILE"
-        echo '+				if (match) {' >> "$PATCH_FILE"
-        echo '+					char model_val[32] = {0};' >> "$PATCH_FILE"
-        echo '+					char final_name[64] = {0};' >> "$PATCH_FILE"
-        echo '+					if (sscanf(match, "device_model=%31s", model_val) == 1) {' >> "$PATCH_FILE"
-        echo '+						snprintf(final_name, sizeof(final_name), "JioRouter AX6000 %s", model_val);' >> "$PATCH_FILE"
-        echo '+						extern void dump_stack_set_arch_desc(const char *fmt, ...);' >> "$PATCH_FILE"
-        echo '+						dump_stack_set_arch_desc("%s", final_name);' >> "$PATCH_FILE"
-        echo '+						pr_info("Jio Platform Driver: Detected Hardware Variant in Flash -> Setting dmesg designation to: %s\n", final_name);' >> "$PATCH_FILE"
-        echo '+					}' >> "$PATCH_FILE"
-        echo '+				}' >> "$PATCH_FILE"
-        echo '+			}' >> "$PATCH_FILE"
-        echo '+			kfree(buf);' >> "$PATCH_FILE"
-        echo '+		}' >> "$PATCH_FILE"
-        echo '+	}' >> "$PATCH_FILE"
-        echo '+' >> "$PATCH_FILE"
-        echo ' 	return 0;' >> "$PATCH_FILE"
-        echo ' ' >> "$PATCH_FILE"
-        echo ' fail_added:' >> "$PATCH_FILE"
-        
-        echo "✅ Early-boot dmesg storage patch cleanly created without EOF syntax errors."
-
-    - name: Inject Native Board Detection Matrix (For LuCI Sync)
-      run: |
-        BOARD_DIR="openwrt/files/etc/board.d"
-        mkdir -p "$BOARD_DIR"
-        NET_FILE="$BOARD_DIR/02_network"
-        
-        echo '#!/bin/sh' > "$NET_FILE"
-        echo '# Native early platform configuration hook' >> "$NET_FILE"
-        echo 'if dmesg | grep -q "Setting dmesg designation to:"; then' >> "$NET_FILE"
-        echo '    DETECTED_MODEL=$(dmesg | grep "Setting dmesg designation to:" | sed '\''s/.*designation to: //'\'')' >> "$NET_FILE"
-        echo '    mkdir -p /tmp/sysinfo' >> "$NET_FILE"
-        echo '    echo "$DETECTED_MODEL" > /tmp/sysinfo/model' >> "$NET_FILE"
-        echo 'fi' >> "$NET_FILE"
-        
-        chmod +x "$NET_FILE"
-        echo "✅ LuCI web dashboard configuration matrix safely generated."
-
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
         cd openwrt
@@ -111,10 +45,74 @@ jobs:
         
         make defconfig
 
+    - name: Prepare Kernel Source Tree and Inject Early dmesg Modification
+      run: |
+        cd openwrt
+        
+        # 1. Force OpenWrt to extract the kernel source and apply all its standard patches first
+        make target/linux/prepare
+        
+        # 2. Find the extracted mtdcore.c inside the active build directories
+        MTD_CORE_FILE=$(find build_dir/target-*/linux-mediatek_filogic/linux-* -name mtdcore.c | head -n 1)
+        
+        if [ -n "$MTD_CORE_FILE" ] && [ -f "$MTD_CORE_FILE" ]; then
+            echo "Found Kernel Storage Driver Source: $MTD_CORE_FILE"
+            
+            # Create our driver hook block as a single string variable
+            HOOK_CODE='if (mtd->name && (strcmp(mtd->name, "MFG") == 0 || strcmp(mtd->name, "mfg") == 0)) {\
+                size_t retlen;\
+                unsigned char *buf = kzalloc(4096, GFP_KERNEL);\
+                if (buf) {\
+                    if (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {\
+                        char *match = strnstr((char *)buf, "device_model=", retlen);\
+                        if (match) {\
+                            char model_val[32] = {0};\
+                            char final_name[64] = {0};\
+                            if (sscanf(match, "device_model=%31s", model_val) == 1) {\
+                                snprintf(final_name, sizeof(final_name), "JioRouter AX6000 %s", model_val);\
+                                extern void dump_stack_set_arch_desc(const char *fmt, ...);\
+                                dump_stack_set_arch_desc("%s", final_name);\
+                                pr_info("Jio Platform Driver: Detected Hardware Variant in Flash -> Setting dmesg designation to: %s\\n", final_name);\
+                            }\
+                        }\
+                    }\
+                    kfree(buf);\
+                }\
+            }'
+            
+            # Inject our hook natively directly inside the "add_mtd_device" function right above "return 0;"
+            sed -i "/fail_added:/i $HOOK_CODE" "$MTD_CORE_FILE"
+            echo "✅ C Driver Source Code safely modified inline for true dmesg identification."
+        else
+            echo "❌ Error: Could not locate kernel source mtdcore.c text workspace."
+            exit 1
+        fi
+
+    - name: Inject Native Board Detection Matrix (For LuCI Sync)
+      run: |
+        BOARD_DIR="openwrt/files/etc/board.d"
+        mkdir -p "$BOARD_DIR"
+        NET_FILE="$BOARD_DIR/02_network"
+        
+        # Reads the dynamic string from the flash block to sync LuCI cleanly on startup
+        echo '#!/bin/sh' > "$NET_FILE"
+        echo '# Native early platform configuration hook' >> "$NET_FILE"
+        echo 'if [ -c "/dev/mtd6" ]; then' >> "$NET_FILE"
+        echo '    DETECTED_MODEL=$(dd if=/dev/mtd6 bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'=' -f2 | tr -d '\''[:space:]'\'')' >> "$NET_FILE"
+        echo '    if [ -n "$DETECTED_MODEL" ]; then' >> "$NET_FILE"
+        echo '        mkdir -p /tmp/sysinfo' >> "$NET_FILE"
+        echo '        echo "JioRouter AX6000 $DETECTED_MODEL" > /tmp/sysinfo/model' >> "$NET_FILE"
+        echo '    fi' >> "$NET_FILE"
+        echo 'fi' >> "$NET_FILE"
+        
+        chmod +x "$NET_FILE"
+        echo "✅ LuCI dashboard mapping script generated seamlessly."
+
     - name: Compile Toolchain and Custom Firmware
       run: |
         cd openwrt
         export FORCE_UNSAFE_CONFIGURE=1
+        # Compiles the pre-patched kernel directly into final firmware files
         make -j$(nproc) || make -j1 V=s
 
     - name: Upload Verified Jio Jidu Custom Firmware
