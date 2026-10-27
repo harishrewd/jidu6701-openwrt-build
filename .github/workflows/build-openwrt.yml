@@ -29,68 +29,67 @@ jobs:
       run: |
         TARGET_PATCH_DIR="openwrt/target/linux/mediatek/patches-6.12"
         mkdir -p "$TARGET_PATCH_DIR"
+        PATCH_FILE="$TARGET_PATCH_DIR/999-jio-mfg-dmesg-override.patch"
         
-        cat << 'EOF' > "$TARGET_PATCH_DIR/999-jio-mfg-dmesg-override.patch"
---- a/drivers/mtd/mtdcore.c
-+++ b/drivers/mtd/mtdcore.c
-@@ -31,6 +31,7 @@
- #include <linux/reboot.h>
- #include <linux/leds.h>
- #include <linux/debugfs.h>
-+#include <linux/string.h>
- 
- #include <linux/mtd/mtd.h>
- #include <linux/mtd/partitions.h>
-@@ -945,6 +946,28 @@ int add_mtd_device(struct mtd_info *mtd)
- 	if (mtd->dev.parent)
- 		device_link_add(&mtd->dev, mtd->dev.parent, DL_FLAG_STATELESS);
- 
-+	if (strcmp(mtd->name, "MFG") == 0 || strcmp(mtd->name, "mfg") == 0) {
-+		size_t retlen;
-+		unsigned char *buf = kmalloc(4096, GFP_KERNEL);
-+		if (buf) {
-+			if (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {
-+				buf[retlen - 1] = '\0';
-+				char *match = strnstr((char *)buf, "device_model=", retlen);
-+				if (match) {
-+					char model_val[32] = {0};
-+					char final_name[64] = {0};
-+					if (sscanf(match, "device_model=%31s", model_val) == 1) {
-+						snprintf(final_name, sizeof(final_name), "JioRouter AX6000 %s", model_val);
-+						extern void dump_stack_set_arch_desc(const char *fmt, ...);
-+						dump_stack_set_arch_desc("%s", final_name);
-+						pr_info("Jio Platform Driver: Detected Hardware Variant in Flash -> Setting dmesg designation to: %s\n", final_name);
-+					}
-+				}
-+			}
-+			kfree(buf);
-+		}
-+	}
-+
- 	return 0;
- 
- fail_added:
-EOF
-        echo "✅ Early-boot dmesg storage patch cleanly injected into kernel tree."
+        # Writing the patch line-by-line using safe echo overrides to prevent EOF truncation bugs
+        echo '--- a/drivers/mtd/mtdcore.c' > "$PATCH_FILE"
+        echo '+++ b/drivers/mtd/mtdcore.c' >> "$PATCH_FILE"
+        echo '@@ -31,6 +31,7 @@' >> "$PATCH_FILE"
+        echo ' #include <linux/reboot.h>' >> "$PATCH_FILE"
+        echo ' #include <linux/leds.h>' >> "$PATCH_FILE"
+        echo ' #include <linux/debugfs.h>' >> "$PATCH_FILE"
+        echo '+#include <linux/string.h>' >> "$PATCH_FILE"
+        echo ' ' >> "$PATCH_FILE"
+        echo ' #include <linux/mtd/mtd.h>' >> "$PATCH_FILE"
+        echo ' #include <linux/mtd/partitions.h>' >> "$PATCH_FILE"
+        echo '@@ -945,6 +946,28 @@ int add_mtd_device(struct mtd_info *mtd)' >> "$PATCH_FILE"
+        echo ' 	if (mtd->dev.parent)' >> "$PATCH_FILE"
+        echo ' 		device_link_add(&mtd->dev, mtd->dev.parent, DL_FLAG_STATELESS);' >> "$PATCH_FILE"
+        echo ' ' >> "$PATCH_FILE"
+        echo '+	if (strcmp(mtd->name, "MFG") == 0 || strcmp(mtd->name, "mfg") == 0) {' >> "$PATCH_FILE"
+        echo '+		size_t retlen;' >> "$PATCH_FILE"
+        echo '+		unsigned char *buf = kmalloc(4096, GFP_KERNEL);' >> "$PATCH_FILE"
+        echo '+		if (buf) {' >> "$PATCH_FILE"
+        echo '+			if (mtd_read(mtd, 0, 4096, &retlen, buf) == 0) {' >> "$PATCH_FILE"
+        echo '+				buf[retlen - 1] = '\''\0'\'';' >> "$PATCH_FILE"
+        echo '+				char *match = strnstr((char *)buf, "device_model=", retlen);' >> "$PATCH_FILE"
+        echo '+				if (match) {' >> "$PATCH_FILE"
+        echo '+					char model_val[32] = {0};' >> "$PATCH_FILE"
+        echo '+					char final_name[64] = {0};' >> "$PATCH_FILE"
+        echo '+					if (sscanf(match, "device_model=%31s", model_val) == 1) {' >> "$PATCH_FILE"
+        echo '+						snprintf(final_name, sizeof(final_name), "JioRouter AX6000 %s", model_val);' >> "$PATCH_FILE"
+        echo '+						extern void dump_stack_set_arch_desc(const char *fmt, ...);' >> "$PATCH_FILE"
+        echo '+						dump_stack_set_arch_desc("%s", final_name);' >> "$PATCH_FILE"
+        echo '+						pr_info("Jio Platform Driver: Detected Hardware Variant in Flash -> Setting dmesg designation to: %s\n", final_name);' >> "$PATCH_FILE"
+        echo '+					}' >> "$PATCH_FILE"
+        echo '+				}' >> "$PATCH_FILE"
+        echo '+			}' >> "$PATCH_FILE"
+        echo '+			kfree(buf);' >> "$PATCH_FILE"
+        echo '+		}' >> "$PATCH_FILE"
+        echo '+	}' >> "$PATCH_FILE"
+        echo '+' >> "$PATCH_FILE"
+        echo ' 	return 0;' >> "$PATCH_FILE"
+        echo ' ' >> "$PATCH_FILE"
+        echo ' fail_added:' >> "$PATCH_FILE"
+        
+        echo "✅ Early-boot dmesg storage patch cleanly created without EOF syntax errors."
 
     - name: Inject Native Board Detection Matrix (For LuCI Sync)
       run: |
         BOARD_DIR="openwrt/files/etc/board.d"
         mkdir -p "$BOARD_DIR"
+        NET_FILE="$BOARD_DIR/02_network"
         
-        cat << 'EOF' > "$BOARD_DIR/02_network"
-#!/bin/sh
-# Native early platform configuration hook
-
-if dmesg | grep -q "Setting dmesg designation to:"; then
-    DETECTED_MODEL=$(dmesg | grep "Setting dmesg designation to:" | sed 's/.*designation to: //')
-    mkdir -p /tmp/sysinfo
-    echo "$DETECTED_MODEL" > /tmp/sysinfo/model
-fi
-EOF
+        echo '#!/bin/sh' > "$NET_FILE"
+        echo '# Native early platform configuration hook' >> "$NET_FILE"
+        echo 'if dmesg | grep -q "Setting dmesg designation to:"; then' >> "$NET_FILE"
+        echo '    DETECTED_MODEL=$(dmesg | grep "Setting dmesg designation to:" | sed '\''s/.*designation to: //'\'')' >> "$NET_FILE"
+        echo '    mkdir -p /tmp/sysinfo' >> "$NET_FILE"
+        echo '    echo "$DETECTED_MODEL" > /tmp/sysinfo/model' >> "$NET_FILE"
+        echo 'fi' >> "$NET_FILE"
         
-        chmod +x "$BOARD_DIR/02_network"
-        echo "✅ LuCI web dashboard sync integrated directly into native early platform initialization."
+        chmod +x "$NET_FILE"
+        echo "✅ LuCI web dashboard configuration matrix safely generated."
 
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
