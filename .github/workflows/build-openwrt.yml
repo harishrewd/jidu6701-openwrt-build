@@ -27,48 +27,52 @@ jobs:
 
     - name: Inject Custom Model Auto-Detection via Files Overlay
       run: |
-        # Use OpenWrt's native files overlay to deposit a clean first-boot configuration hook
-        # This keeps the underlying source tree completely stock and clean
-        OVERLAY_DIR="openwrt/files/etc/uci-defaults"
+        # Create a persistent initialization service directory
+        OVERLAY_DIR="openwrt/files/etc/init.d"
         mkdir -p "$OVERLAY_DIR"
-        DEFAULTS_SCRIPT="$OVERLAY_DIR/99-jio-model-detect"
+        BOOT_SERVICE="$OVERLAY_DIR/z_jio_model_override"
         
-        cat << 'EOF' > "$DEFAULTS_SCRIPT"
-        #!/bin/sh
-        
-        local raw_model=""
-        local final_name="JioRouter AX6000 JIDU6J01"
+        cat << 'EOF' > "$BOOT_SERVICE"
+        #!/bin/sh /etc/rc.common
 
-        # Safe read-only identification scan directly from the factory MFG partition
-        if [ -c "/dev/mtd6" ]; then
-            raw_model=$(dd if="/dev/mtd6" bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'=' -f2 | tr -d '[:space:]')
-        fi
+        # START=99 runs late enough on every boot to override OpenWrt's native generic assignments
+        START=99
 
-        case "$raw_model" in
-            JIDU6201) final_name="JioRouter AX6000 JIDU6201" ;;
-            JIDU6401) final_name="JioRouter AX6000 JIDU6401" ;;
-            JIDU6701) final_name="JioRouter AX6000 JIDU6701" ;;
-            JIDU6801) final_name="JioRouter AX6000 JIDU6801" ;;
-            *) 
-                if [ -n "$raw_model" ]; then
-                    final_name="JioRouter AX6000 $raw_model"
-                fi
-                ;;
-        esac
+        boot() {
+            local raw_model=""
+            local final_name="JioRouter AX6000 JIDU6J01"
 
-        # Set the volatile memory tag immediately for the first-boot rendering
-        mkdir -p /tmp/sysinfo
-        echo "$final_name" > /tmp/sysinfo/model
-        
-        # Commit the true model configuration permanently into the system parameters database
-        uci set system.@system[0].model="$final_name"
-        uci commit system
-        
-        exit 0
+            # Direct read-only extraction out of the factory partition block
+            if [ -c "/dev/mtd6" ]; then
+                raw_model=$(dd if="/dev/mtd6" bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'=' -f2 | tr -d '[:space:]')
+            fi
+
+            case "$raw_model" in
+                JIDU6201) final_name="JioRouter AX6000 JIDU6201" ;;
+                JIDU6401) final_name="JioRouter AX6000 JIDU6401" ;;
+                JIDU6701) final_name="JioRouter AX6000 JIDU6701" ;;
+                JIDU6801) final_name="JioRouter AX6000 JIDU6801" ;;
+                *) 
+                    if [ -n "$raw_model" ]; then
+                        final_name="JioRouter AX6000 $raw_model"
+                    fi
+                    ;;
+            esac
+
+            # Override the temporary runtime endpoints that LuCI targets on every boot cycle
+            mkdir -p /tmp/sysinfo
+            echo "$final_name" > /tmp/sysinfo/model
+        }
         EOF
         
-        chmod +x "$DEFAULTS_SCRIPT"
-        echo "✅ First-boot uci-defaults override configuration script generated in files/ overlay."
+        chmod +x "$BOOT_SERVICE"
+        
+        # Pre-enable the boot hook framework by creating the symlink directly inside the build rootfs structure
+        LINK_DIR="openwrt/files/etc/rc.d"
+        mkdir -p "$LINK_DIR"
+        ln -sf "../init.d/z_jio_model_override" "$LINK_DIR/S99z_jio_model_override"
+        
+        echo "✅ Persistent boot-cycle model auto-detection override successfully compiled into system layout."
 
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
@@ -85,7 +89,7 @@ jobs:
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
         echo "CONFIG_TARGET_PROFILE=\"DEVICE_jiorouter_ax6000-jidu6j01\"" >> .config
         
-        # Include baseline user interface web interface components
+        # Include baseline user interface components
         echo "CONFIG_PACKAGE_dnsmasq=y" >> .config
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_PACKAGE_luci-app-firewall=y" >> .config
