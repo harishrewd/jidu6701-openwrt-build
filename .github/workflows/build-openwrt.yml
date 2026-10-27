@@ -27,11 +27,19 @@ jobs:
 
     - name: Patch Native OpenWrt Target Platform for Early Architecture Auto-Detection
       run: |
-        SYSINFO_FILE="openwrt/target/linux/mediatek/filogic/base-files/etc/board.d/02_sysinfo"
+        echo "Searching for 02_sysinfo dynamically within the MediaTek target structure..."
+        # Locate the true file path automatically to prevent "No such file or directory" errors
+        SYSINFO_FILE=$(find openwrt/target/linux/mediatek/ -name "02_sysinfo" | head -n 1)
         
+        if [ -z "$SYSINFO_FILE" ]; then
+            echo "❌ Error: Could not find 02_sysinfo file anywhere in the mediatek target folder structure."
+            exit 1
+        fi
+        
+        echo "Found sysinfo file at: $SYSINFO_FILE"
         echo "Injecting clean, native early model detection logic into Mediatek base target..."
         
-        # Write out the patch logic directly to an isolated temporary file to solve YAML parsing issues
+        # Write the patch script
         cat << 'PATCHEOF' > patch_sysinfo.sh
         #!/bin/bash
         sed -i '/jiorouter,ax6000-jidu6j01)/,/;;/c\
@@ -51,7 +59,6 @@ jobs:
         \t\t;;' "$1"
         PATCHEOF
 
-        # Run our dedicated path string adjustment patch directly
         chmod +x patch_sysinfo.sh
         ./patch_sysinfo.sh "$SYSINFO_FILE"
 
