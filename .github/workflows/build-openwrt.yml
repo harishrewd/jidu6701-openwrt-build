@@ -32,14 +32,7 @@ jobs:
         mkdir -p "$OVERLAY_DIR"
         BOARD_SCRIPT="$OVERLAY_DIR/01_system"
         
-        # 1. Update the compile-time image definition string
-        TARGET_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
-        if [ -f "$TARGET_FILE" ]; then
-          sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU Series/g' "$TARGET_FILE"
-          echo "✅ Compilation matrix set to generic Series tracking."
-        fi
-        
-        # 2. Write the detection logic cleanly directly into our custom files overlay
+        # Write the dynamic regex detection logic cleanly directly into our custom files overlay
         cat << 'EOF' > "$BOARD_SCRIPT"
         #!/bin/sh
         # Dynamic Jio Router Model Auto-Detection script for unified MediaTek profile
