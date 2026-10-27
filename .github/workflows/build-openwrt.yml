@@ -47,28 +47,34 @@ jobs:
         . /lib/functions/system.sh
         
         jio_board_detect() {
-        	local model
+        	local raw_model
+        	local clean_model
+        	
         	if [ -f /proc/device-tree/model ]; then
-        		model=$(cat /proc/device-tree/model 2>/dev/null | tr -d "\0")
+        		# Read raw device tree model and strip null bytes
+        		raw_model=$(cat /proc/device-tree/model 2>/dev/null | tr -d "\0")
         	fi
-        	case "$model" in
-        		*JIDU6201*) model="JioRouter AX6000 JIDU6201" ;;
-        		*JIDU6401*) model="JioRouter AX6000 JIDU6401" ;;
-        		*JIDU6601*) model="JioRouter AX6000 JIDU6601" ;;
-        		*JIDU6701*) model="JioRouter AX6000 JIDU6701" ;;
-        		*JIDU6801*) model="JioRouter AX6000 JIDU6801" ;;
-        		*) model="JioRouter AX6000 JIDU6701 (Auto-Detected)" ;;
-        	esac
+        	
+        	# Extract the exact JIDU model code (e.g., JIDU6401) using sed match filtering
+        	if echo "$raw_model" | grep -q "JIDU"; then
+        		clean_model=$(echo "$raw_model" | sed -n 's/.*\(JIDU[0-9]\{4\}\).*/\1/p')
+        		model="JioRouter AX6000 $clean_model"
+        	else
+        		# Safe emergency fallback showing whatever string the device tree contains
+        		model="JioRouter AX6000 (Variant: $raw_model)"
+        	fi
+        	
         	mkdir -p /tmp/sysinfo
         	echo "jiorouter_ax6000-jidu6j01" > /tmp/sysinfo/board_name
         	echo "$model" > /tmp/sysinfo/model
         }
         
-        UCIDEV_BOOTSTEP=jio_board_detect
+        # Force execution immediately during initialization loop evaluation
+        jio_board_detect
         EOF
         
         chmod +x "$BOARD_SCRIPT"
-        echo "✅ Embedded hardware runtime lookup engine injected successfully into files/ overlay."
+        echo "✅ Dynamic regex-based hardware lookup engine injected successfully into files/ overlay."
 
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
