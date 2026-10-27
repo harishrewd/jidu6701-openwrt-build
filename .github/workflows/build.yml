@@ -1,4 +1,4 @@
-name: Compile Clean Jio JIDU 6701 Stock-Style Firmware (v25.12.6)
+name: Compile Clean Jio JIDU Auto-Detect Stock-Style Firmware (v25.12.6)
 
 on:
   workflow_dispatch:
@@ -25,31 +25,61 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Inject Permanent JIDU 6701 Model Name
+    - name: Inject Custom Model Auto-Detection via Files Overlay
       run: |
+        # Define the exact destination folder structure in OpenWrt's custom files override directory
+        OVERLAY_DIR="openwrt/files/etc/board.d"
+        mkdir -p "$OVERLAY_DIR"
+        BOARD_SCRIPT="$OVERLAY_DIR/01_system"
+        
+        # 1. Update the compile-time image definition string
         TARGET_FILE="openwrt/target/linux/mediatek/image/filogic.mk"
-        BOARD_SCRIPT="openwrt/target/linux/mediatek/filogic/base-files/etc/board.d/01_system"
-        DTS_FILE="openwrt/target/linux/mediatek/dts/mt7986a-jiorouter-jidu6j01.dts"
-        
-        # 1. Update compilation metadata layout branding
         if [ -f "$TARGET_FILE" ]; then
-          sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU6701/g' "$TARGET_FILE"
-          echo "✅ Device metadata patched successfully."
+          sed -i 's/DEVICE_MODEL := JioRouter AX6000 JIDU6J01/DEVICE_MODEL := JioRouter AX6000 JIDU Series/g' "$TARGET_FILE"
+          echo "✅ Compilation matrix set to generic Series tracking."
         fi
         
-        # 2. Update internal system fallback identification script
-        if [ -f "$BOARD_SCRIPT" ]; then
-          sed -i 's/JioRouter AX6000 JIDU6J01/JioRouter AX6000 JIDU6701/g' "$BOARD_SCRIPT"
-          echo "✅ Board initialization string updated successfully."
-        fi
+        # 2. Write your exact original detection logic into our custom files overlay
+        cat << 'EOF' > "$BOARD_SCRIPT"
+        #!/bin/sh
+        # Dynamic Jio Router Model Auto-Detection script for unified MediaTek profile
+        . /lib/functions.sh
+        . /lib/functions/system.sh
         
-        # 3. CRITICAL DEVICE TREE FIX: Force the built kernel block to identify natively as 6701
-        if [ -f "$DTS_FILE" ]; then
-          sed -i 's/model = "JioRouter AX6000 JIDU6J01";/model = "JioRouter AX6000 JIDU6701";/g' "$DTS_FILE"
-          echo "✅ Device Tree hardware model string patched successfully."
-        fi
+        jio_board_detect() {
+        	local model
+        	if [ -f /proc/device-tree/model ]; then
+        		model=$(cat /proc/device-tree/model 2>/dev/null | tr -d "\0")
+        	fi
+        	case "$model" in
+        		*JIDU6201*) model="JioRouter AX6000 JIDU6201" ;;
+        		*JIDU6401*) model="JioRouter AX6000 JIDU6401" ;;
+        		*JIDU6601*) model="JioRouter AX6000 JIDU6601" ;;
+        		*JIDU6701*) model="JioRouter AX6000 JIDU6701" ;;
+        		*JIDU6801*) model="JioRouter AX6000 JIDU6801" ;;
+        		*) 
+        			# Fully automated dynamic lookup: extracts the JIDU#### code right out of the device tree
+        			local clean_id=$(echo "$model" | sed -n 's/.*\(JIDU[0-9]\{4\}\).*/\1/p')
+        			if [ -n "$clean_id" ]; then
+        				model="JioRouter AX6000 $clean_id"
+        			else
+        				model="JioRouter AX6000 JIDU6J01"
+        			fi
+        			;;
+        	esac
+        	mkdir -p /tmp/sysinfo
+        	echo "jiorouter_ax6000-jidu6j01" > /tmp/sysinfo/board_name
+        	echo "$model" > /tmp/sysinfo/model
+        }
+        
+        # Force execution immediately during initialization loop evaluation
+        jio_board_detect
+        EOF
+        
+        chmod +x "$BOARD_SCRIPT"
+        echo "✅ Embedded hardware runtime lookup engine injected successfully into files/ overlay."
 
-    - name: Configure Target Matrix (True JIDU 6701 Firmware Selection)
+    - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
         cd openwrt
         rm -f .config
@@ -65,9 +95,6 @@ jobs:
         echo "CONFIG_TARGET_SUBTARGET=\"filogic\"" >> .config
         echo "CONFIG_TARGET_PROFILE=\"DEVICE_jiorouter_ax6000-jidu6j01\"" >> .config
         
-        # CRITICAL 40MHz FIX: Disables 20/40MHz coexistence checks in hostapd to force 40MHz width
-        echo "CONFIG_DRIVER_11N_2040_COEX=n" >> .config
-        
         # Include baseline interface components
         echo "CONFIG_PACKAGE_dnsmasq=y" >> .config
         echo "CONFIG_PACKAGE_luci=y" >> .config
@@ -81,9 +108,9 @@ jobs:
         export FORCE_UNSAFE_CONFIGURE=1
         make -j$(nproc) || make -j1 V=s
 
-    - name: Upload Verified Jio Jidu 6701 Custom Firmware
+    - name: Upload Verified Jio Jidu Custom Firmware
       uses: actions/upload-artifact@v4
       with:
-        name: JIDU6701-OpenWrt-v25.12.6-TrueARMv8-Unbound-1.26.1
+        name: JIDU-OpenWrt-AutoDetect-StockRadio-v25.12.6
         path: |
           openwrt/bin/**/*.bin
