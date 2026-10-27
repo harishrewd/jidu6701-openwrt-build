@@ -1,11 +1,11 @@
-workflow-name: Compile Clean Jio JIDU Auto-Detect Stock-Style Firmware (v25.12.6)
+name: Compile Clean Jio JIDU Auto-Detect Stock-Style Firmware (v25.12.6)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04
 
     steps:
     - name: Checkout Repository
