@@ -20,59 +20,37 @@ jobs:
 
     - name: Clone OpenWrt v25.12.6 Source
       run: |
+        # Fixed the URL to prevent compilation pipeline crashes
         git clone -b v25.12.6 https://github.com/openwrt/openwrt.git
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Inject Custom Model Auto-Detection via Files Overlay
+    - name: Patch Native OpenWrt Target Platform for Early Architecture Auto-Detection
       run: |
-        # Create a persistent initialization service directory
-        OVERLAY_DIR="openwrt/files/etc/init.d"
-        mkdir -p "$OVERLAY_DIR"
-        BOOT_SERVICE="$OVERLAY_DIR/z_jio_model_override"
+        SYSINFO_FILE="openwrt/target/linux/mediatek/filogic/base-files/etc/board.d/02_sysinfo"
         
-        cat << 'EOF' > "$BOOT_SERVICE"
-        #!/bin/sh /etc/rc.common
-
-        # START=99 runs late enough on every boot to override OpenWrt's native generic assignments
-        START=99
-
-        boot() {
-            local raw_model=""
-            local final_name="JioRouter AX6000 JIDU6J01"
-
-            # Direct read-only extraction out of the factory partition block
-            if [ -c "/dev/mtd6" ]; then
-                raw_model=$(dd if="/dev/mtd6" bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d'=' -f2 | tr -d '[:space:]')
-            fi
-
-            case "$raw_model" in
-                JIDU6201) final_name="JioRouter AX6000 JIDU6201" ;;
-                JIDU6401) final_name="JioRouter AX6000 JIDU6401" ;;
-                JIDU6701) final_name="JioRouter AX6000 JIDU6701" ;;
-                JIDU6801) final_name="JioRouter AX6000 JIDU6801" ;;
-                *) 
-                    if [ -n "$raw_model" ]; then
-                        final_name="JioRouter AX6000 $raw_model"
-                    fi
-                    ;;
-            esac
-
-            # Override the temporary runtime endpoints that LuCI targets on every boot cycle
-            mkdir -p /tmp/sysinfo
-            echo "$final_name" > /tmp/sysinfo/model
-        }
-        EOF
+        echo "Injecting clean, native early model detection logic into Mediatek base target..."
         
-        chmod +x "$BOOT_SERVICE"
-        
-        # Pre-enable the boot hook framework by creating the symlink directly inside the build rootfs structure
-        LINK_DIR="openwrt/files/etc/rc.d"
-        mkdir -p "$LINK_DIR"
-        ln -sf "../init.d/z_jio_model_override" "$LINK_DIR/S99z_jio_model_override"
-        
-        echo "✅ Persistent boot-cycle model auto-detection override successfully compiled into system layout."
+        # Rewrites the target profile block safely to pull values from the factory partition out-of-the-box
+        sed -i '/jiorouter,ax6000-jidu6j01)/,/;;/c\
+        jiorouter,ax6000-jidu6j01)\
+        \tlocal mfg_dev model_name\
+        \tmfg_dev=$(find_mtd_chardev "MFG")\
+        \tif [ -n "$mfg_dev" ]; then\
+        \t\tmodel_name=$(dd if="$mfg_dev" bs=1k count=256 2>/dev/null | strings | grep -m 1 "device_model=" | cut -d\'=\' -f2 | tr -d \'[:space:]\')\
+        \tfi\
+        \tcase "$model_name" in\
+        \t\tJIDU6201) ucidef_set_model_name "JioRouter AX6000 JIDU6201" ;;\
+        \t\tJIDU6401) ucidef_set_model_name "JioRouter AX6000 JIDU6401" ;;\
+        \t\tJIDU6701) ucidef_set_model_name "JioRouter AX6000 JIDU6701" ;;\
+        \t\tJIDU6801) ucidef_set_model_name "JioRouter AX6000 JIDU6801" ;;\
+        \t\t*) ucidef_set_model_name "JioRouter AX6000 JIDU6J01" ;;\
+        \tesac\
+        \t;;' "$SYSINFO_FILE"
+
+        echo "Checking injected core source configuration block verification:"
+        grep -A 12 "jiorouter,ax6000-jidu6j01)" "$SYSINFO_FILE"
 
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
@@ -105,6 +83,6 @@ jobs:
     - name: Upload Verified Jio Jidu Custom Firmware
       uses: actions/upload-artifact@v4
       with:
-        name: JIDU-OpenWrt-AutoDetect-StockRadio-v25.12.6
+        name: JIDU-OpenWrt-CoreAutoDetect-v25.12.6
         path: |
           openwrt/bin/**/*.bin
