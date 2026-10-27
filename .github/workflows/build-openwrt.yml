@@ -32,10 +32,10 @@ jobs:
         mkdir -p "$OVERLAY_DIR"
         BOARD_SCRIPT="$OVERLAY_DIR/01_system"
         
-        # Write the dynamic string replacement detection logic directly into our custom files overlay
+        # Write the dynamic lookup logic directly into our custom files overlay
+        # This leaves core firmware files untouched and only overrides the LuCI display value on boot
         cat << 'EOF' > "$BOARD_SCRIPT"
         #!/bin/sh
-        # Dynamic Jio Router Model Auto-Detection script for unified MediaTek profile
         . /lib/functions.sh
         . /lib/functions/system.sh
         
@@ -43,7 +43,7 @@ jobs:
         	local raw_model=""
         	
         	if [ -f /proc/device-tree/model ]; then
-        		# Read raw hardware model string and drop null bytes cleanly
+        		# Read raw hardware model string directly from the physical chip and drop null bytes cleanly
         		raw_model=$(cat /proc/device-tree/model 2>/dev/null | tr -d "\0" | xargs)
         	fi
         	
@@ -60,7 +60,7 @@ jobs:
         EOF
         
         chmod +x "$BOARD_SCRIPT"
-        echo "✅ Flawless string parsing lookup engine injected successfully into files/ overlay."
+        echo "✅ Safe user-space model mapping script injected into files/ overlay."
 
     - name: Configure Target Matrix (True JIDU Firmware Selection)
       run: |
